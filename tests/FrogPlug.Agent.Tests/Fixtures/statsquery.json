@@ -1,0 +1,16 @@
+{
+    "stat": [
+        {
+            "name": "user>>>u1>>>traffic>>>uplink",
+            "value": "1000"
+        },
+        {
+            "name": "user>>>u1>>>traffic>>>downlink",
+            "value": "5000"
+        },
+        {
+            "name": "user>>>node2>>>traffic>>>downlink",
+            "value": 77
+        }
+    ]
+}
