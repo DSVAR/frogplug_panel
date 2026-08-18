@@ -1,0 +1,12 @@
+﻿@inject NavigationManager Navigation
+@inject FrogPlug.Server.Data.AppDbContext Db
+
+<p>Проверка доступа...</p>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var target = await Db.Admins.AnyAsync() ? "login" : "setup";
+        Navigation.NavigateTo(target, replace: true);
+    }
+}

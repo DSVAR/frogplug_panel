@@ -1,0 +1,23 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    @* Только путь, без схемы и домена: за обратным прокси схема может определиться как http. *@
+    <base href="@(new Uri(Navigation.BaseUri).AbsolutePath)" />
+    <ResourcePreloader />
+    <link rel="stylesheet" href="css/fonts.css" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["FrogPlug.Server.styles.css"]" />
+    <ImportMap />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="js/clipboard.js"></script>
+    <script src="js/password-toggle.js"></script>
+    <script src="js/popover.js"></script>
+</body>
+</html>

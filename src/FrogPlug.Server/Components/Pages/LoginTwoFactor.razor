@@ -1,0 +1,85 @@
+@page "/login/2fa"
+@layout AuthLayout
+@attribute [AllowAnonymous]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject FrogPlug.Server.Services.AdminAuthService Auth
+@inject FrogPlug.Server.Services.PendingLoginTokenService PendingLoginTokens
+@inject NavigationManager Navigation
+
+<PageTitle>Двухфакторная аутентификация</PageTitle>
+<div class="auth-brand">
+    <span class="ava"><Icon Name="overview" /></span>
+    <div><strong>FrogPlug Panel</strong><span class="brand-sub">Xray · доступ для администраторов</span></div>
+</div>
+<h1>Подтвердите вход</h1>
+<p class="auth-subtitle">Шаг 2 из 2 — код из приложения-аутентификатора</p>
+
+<EditForm Model="Model" OnValidSubmit="HandleSubmit" FormName="login-2fa" Enhance>
+    <DataAnnotationsValidator />
+    <div class="form-field">
+        <label for="code">Код</label>
+        <div class="input-with-icon">
+            <Icon Name="key" />
+            <InputText id="code" class="otp-input" @bind-Value="Model.Code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
+        </div>
+        <ValidationMessage For="@(() => Model.Code)" />
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <div class="form-error">@Error</div>
+    }
+    <button class="btn btn-primary btn-block" type="submit">Продолжить <Icon Name="arrow-right" /></button>
+</EditForm>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromForm]
+    private TwoFactorModel Model { get; set; } = new();
+
+    private string? Error { get; set; }
+
+    private async Task HandleSubmit()
+    {
+        if (!HttpContext!.Request.Cookies.TryGetValue("FrogPlug.PendingLogin", out var token)
+            || !PendingLoginTokens.TryRead(token, out var pending))
+        {
+            Error = "Время подтверждения входа истекло. Войдите снова.";
+            return;
+        }
+
+        var result = await Auth.ValidateTwoFactor(pending.AdminId, Model.Code);
+        if (!result.Success)
+        {
+            Error = result.LockedUntil is { } locked
+                ? $"Слишком много попыток, вход заблокирован до {locked.ToLocalTime():HH:mm}"
+                : result.Error;
+            return;
+        }
+
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.Name, result.Admin!.Login),
+            new Claim(ClaimTypes.NameIdentifier, result.Admin.Id.ToString())
+        };
+        var properties = new AuthenticationProperties
+        {
+            IsPersistent = pending.Remember,
+            ExpiresUtc = pending.Remember ? DateTimeOffset.UtcNow.AddDays(30) : null
+        };
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity), properties);
+        HttpContext.Response.Cookies.Delete("FrogPlug.PendingLogin");
+        Navigation.NavigateTo("", replace: true);
+    }
+
+    private sealed class TwoFactorModel
+    {
+        [Required(ErrorMessage = "Укажите код")]
+        [RegularExpression("^[0-9]{6}$", ErrorMessage = "Код должен состоять из шести цифр")]
+        public string Code { get; set; } = string.Empty;
+    }
+}

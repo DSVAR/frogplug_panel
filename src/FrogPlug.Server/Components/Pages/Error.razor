@@ -1,0 +1,15 @@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Ошибка</PageTitle>
+<h1>Произошла ошибка</h1>
+<p>Попробуйте обновить страницу или обратитесь к администратору.</p>
+@if (!string.IsNullOrEmpty(RequestId))
+{
+    <p>Идентификатор запроса: <code>@RequestId</code></p>
+}
+
+@code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+    private string? RequestId => Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

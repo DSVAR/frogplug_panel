@@ -1,0 +1,311 @@
+@page "/setup"
+@layout AuthLayout
+@attribute [AllowAnonymous]
+@using System.Net
+@using System.Net.Sockets
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using FrogPlug.Core
+@using FrogPlug.Server.Services
+@inject FrogPlug.Server.Data.AppDbContext Db
+@inject FrogPlug.Server.Services.AdminAuthService Auth
+@inject FrogPlug.Server.Services.FirstSetupService FirstSetup
+@inject FrogPlug.Server.Services.SettingsService Settings
+@inject NavigationManager Navigation
+
+<PageTitle>Первая настройка</PageTitle>
+<div class="auth-brand">
+    <span class="ava"><Icon Name="overview" /></span>
+    <div><strong>FrogPlug Panel</strong><span class="brand-sub">Xray · первая настройка</span></div>
+</div>
+
+@if (!IsTokenValid)
+{
+    <h1>Первая настройка</h1>
+    <p class="auth-subtitle">Откройте ссылку из консоли установки</p>
+}
+else
+{
+    <h1>Первая настройка</h1>
+    <p class="auth-subtitle">Шаг @Model.Step из 3</p>
+
+    <EditForm Model="Model" OnSubmit="HandleSubmit" FormName="setup" Enhance>
+        <input type="hidden" name="Model.Step" value="@Model.Step" />
+        @if (Model.Step > 1)
+        {
+            <input type="hidden" name="Model.Domain" value="@Model.Domain" />
+        }
+        @if (Model.Step > 2)
+        {
+            <input type="hidden" name="Model.Login" value="@Model.Login" />
+            <input type="hidden" name="Model.Password" value="@Model.Password" />
+            <input type="hidden" name="Model.PasswordRepeat" value="@Model.PasswordRepeat" />
+        }
+        @if (Model.Step == 1)
+        {
+            <div class="form-field">
+                <label for="domain">Домен</label>
+                <InputText id="domain" @bind-Value="Model.Domain" autocomplete="url" placeholder="vpn.example.com" />
+                <small>Укажите доменное имя панели.</small>
+            </div>
+            @if (ResolvedAddresses.Count > 0)
+            {
+                <div class="form-field">
+                    <strong>Найдены записи</strong>
+                    <div>@string.Join(", ", ResolvedAddresses)</div>
+                </div>
+            }
+            <p class="muted">A-запись должна указывать на @ServerAddress.</p>
+            @if (!string.IsNullOrWhiteSpace(Error))
+            {
+                <div class="form-error">@Error</div>
+            }
+            <div class="head-actions">
+                <button class="btn" type="submit" name="Model.Action" value="check">Проверить</button>
+                <button class="btn btn-primary" type="submit" name="Model.Action" value="next">Продолжить</button>
+            </div>
+            <button class="btn" type="submit" name="Model.Action" value="skip">Пропустить, пока работать по IP</button>
+        }
+        else if (Model.Step == 2)
+        {
+            <div class="form-field">
+                <label for="login">Логин</label>
+                <InputText id="login" @bind-Value="Model.Login" autocomplete="username" />
+            </div>
+            <div class="form-field">
+                <label for="password">Пароль</label>
+                <div class="input-with-icon password-input">
+                    <Icon Name="lock" />
+                    <InputText id="password" type="password" @bind-Value="Model.Password" autocomplete="new-password" />
+                    <button class="password-toggle" type="button" data-password-toggle="password" aria-label="Показать пароль">
+                        <Icon Name="eye" />
+                    </button>
+                </div>
+            </div>
+            <div class="form-field">
+                <label for="password-repeat">Повторите пароль</label>
+                <InputText id="password-repeat" type="password" @bind-Value="Model.PasswordRepeat" autocomplete="new-password" />
+            </div>
+            <p class="muted">Используйте не менее 12 символов.</p>
+            @if (!string.IsNullOrWhiteSpace(Error))
+            {
+                <div class="form-error">@Error</div>
+            }
+            <div class="head-actions">
+                <button class="btn" type="submit" name="Model.Action" value="generate">Сгенерировать</button>
+                <button class="btn" type="button" data-copy-target="password">Копировать</button>
+                <button class="btn btn-primary" type="submit" name="Model.Action" value="next">Продолжить</button>
+            </div>
+        }
+        else
+        {
+            <div class="form-field">
+                <strong>Домен</strong>
+                <div>@(string.IsNullOrWhiteSpace(Model.Domain) ? "Работа по IP" : Model.Domain)</div>
+            </div>
+            <div class="form-field">
+                <strong>Администратор</strong>
+                <div>@Model.Login</div>
+            </div>
+            <div class="form-field checkbox-field">
+                <InputCheckbox id="password-saved" @bind-Value="Model.PasswordSaved" />
+                <label for="password-saved">Я сохранил пароль</label>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(Error))
+            {
+                <div class="form-error">@Error</div>
+            }
+            <button class="btn btn-primary btn-block" type="submit" name="Model.Action" value="finish">Войти в панель</button>
+        }
+    </EditForm>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromQuery(Name = "token")]
+    public string? Token { get; set; }
+
+    [SupplyParameterFromForm]
+    private SetupModel Model { get; set; } = new();
+
+    private bool IsTokenValid { get; set; }
+    private string? Error { get; set; }
+    private List<string> ResolvedAddresses { get; } = [];
+    private string ServerAddress => FirstSetupService.PublicIpv4() ?? "внешний IP этого сервера";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (await Db.Admins.AnyAsync())
+        {
+            Navigation.NavigateTo("login", replace: true);
+            return;
+        }
+
+        IsTokenValid = await FirstSetup.IsValid(Token);
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (!await FirstSetup.IsValid(Token))
+        {
+            IsTokenValid = false;
+            return;
+        }
+
+        Error = null;
+        if (Model.Action == "check")
+        {
+            await ResolveDomain();
+            return;
+        }
+
+        if (Model.Action == "generate")
+        {
+            Model.Password = PasswordGenerator.Generate();
+            Model.PasswordRepeat = Model.Password;
+            return;
+        }
+
+        if (Model.Step == 1)
+        {
+            await ContinueFromDomain();
+            return;
+        }
+
+        if (Model.Step == 2)
+        {
+            ContinueFromAdmin();
+            return;
+        }
+
+        await Finish();
+    }
+
+    private async Task ResolveDomain()
+    {
+        if (!IsValidDomain(Model.Domain))
+        {
+            Error = "Укажите корректное доменное имя";
+            return;
+        }
+
+        ResolvedAddresses.Clear();
+        try
+        {
+            var addresses = await Dns.GetHostAddressesAsync(Model.Domain);
+            ResolvedAddresses.AddRange(addresses.Select(address => address.ToString()));
+        }
+        catch (SocketException)
+        {
+            Error = "DNS-записи пока не найдены. Можно продолжить с предупреждением.";
+            return;
+        }
+        if (ResolvedAddresses.Count == 0)
+        {
+            Error = "DNS-записи пока не найдены. Можно продолжить с предупреждением.";
+        }
+    }
+
+    private async Task ContinueFromDomain()
+    {
+        if (Model.Action == "skip")
+        {
+            Model.Domain = string.Empty;
+            Model.Step = 2;
+            return;
+        }
+
+        if (!IsValidDomain(Model.Domain))
+        {
+            Error = "Укажите корректное доменное имя или выберите работу по IP";
+            return;
+        }
+
+        await Settings.SetPanelDomain(Model.Domain.Trim().ToLowerInvariant());
+        var pathBase = new Uri(Navigation.BaseUri).AbsolutePath.TrimEnd('/');
+        await Settings.SetPublicBaseUrl($"https://{Model.Domain.Trim().ToLowerInvariant()}{pathBase}");
+        Model.Step = 2;
+    }
+
+    private void ContinueFromAdmin()
+    {
+        if (string.IsNullOrWhiteSpace(Model.Login))
+        {
+            Error = "Укажите логин";
+            return;
+        }
+
+        if (Model.Password.Length < 12)
+        {
+            Error = "Пароль должен содержать не менее 12 символов";
+            return;
+        }
+
+        if (Model.Password != Model.PasswordRepeat)
+        {
+            Error = "Пароли не совпадают";
+            return;
+        }
+
+        Model.Step = 3;
+    }
+
+    private async Task Finish()
+    {
+        if (!Model.PasswordSaved)
+        {
+            Error = "Подтвердите, что сохранили пароль";
+            return;
+        }
+
+        try
+        {
+            var admin = await Auth.CreateFirstAdmin(Model.Login, Model.Password);
+            await FirstSetup.Consume();
+            await SignIn(admin);
+            Navigation.NavigateTo("", replace: true);
+        }
+        catch (ArgumentException exception)
+        {
+            Error = exception.Message;
+        }
+        catch (InvalidOperationException exception)
+        {
+            Error = exception.Message;
+        }
+    }
+
+    private async Task SignIn(Admin admin)
+    {
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.Name, admin.Login),
+            new Claim(ClaimTypes.NameIdentifier, admin.Id.ToString())
+        };
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        await HttpContext!.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            new ClaimsPrincipal(identity));
+    }
+
+    private static bool IsValidDomain(string? domain)
+    {
+        return !string.IsNullOrWhiteSpace(domain)
+            && Uri.CheckHostName(domain.Trim()) == UriHostNameType.Dns
+            && domain.Trim().Length <= 253;
+    }
+
+    private sealed class SetupModel
+    {
+        public int Step { get; set; } = 1;
+        public string Action { get; set; } = string.Empty;
+        public string Domain { get; set; } = string.Empty;
+        public string Login { get; set; } = "admin";
+        public string Password { get; set; } = string.Empty;
+        public string PasswordRepeat { get; set; } = string.Empty;
+        public bool PasswordSaved { get; set; }
+    }
+}

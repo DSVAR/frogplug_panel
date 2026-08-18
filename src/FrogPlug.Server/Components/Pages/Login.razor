@@ -1,0 +1,114 @@
+@page "/login"
+@layout AuthLayout
+@attribute [AllowAnonymous]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject FrogPlug.Server.Services.AdminAuthService Auth
+@inject FrogPlug.Server.Services.PendingLoginTokenService PendingLoginTokens
+@inject NavigationManager Navigation
+
+<PageTitle>Вход</PageTitle>
+<div class="auth-brand">
+    <span class="ava"><Icon Name="overview" /></span>
+    <div><strong>FrogPlug Panel</strong><span class="brand-sub">Xray · доступ для администраторов</span></div>
+</div>
+<h1>Вход</h1>
+<p class="auth-subtitle">Шаг 1 из 2 — логин и пароль</p>
+
+<EditForm Model="Model" OnValidSubmit="HandleSubmit" FormName="login" Enhance>
+    <DataAnnotationsValidator />
+    <div class="form-field">
+        <label for="login">Логин</label>
+        <div class="input-with-icon">
+            <Icon Name="users" />
+            <InputText id="login" @bind-Value="Model.Login" autocomplete="username" />
+        </div>
+        <ValidationMessage For="@(() => Model.Login)" />
+    </div>
+    <div class="form-field">
+        <label for="password">Пароль</label>
+        <div class="input-with-icon password-input">
+            <Icon Name="lock" />
+            <InputText id="password" type="password" @bind-Value="Model.Password" autocomplete="current-password" />
+            <button class="password-toggle" type="button" data-password-toggle="password" aria-label="Показать пароль">
+                <Icon Name="eye" />
+            </button>
+        </div>
+        <ValidationMessage For="@(() => Model.Password)" />
+    </div>
+    <div class="form-field checkbox-field">
+        <InputCheckbox id="remember" @bind-Value="Model.Remember" />
+        <label for="remember">Запомнить меня на этом устройстве</label>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <div class="form-error">@Error</div>
+    }
+    <button class="btn btn-primary btn-block" type="submit">Продолжить <Icon Name="arrow-right" /></button>
+</EditForm>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    [SupplyParameterFromForm]
+    private LoginModel Model { get; set; } = new();
+
+    private string? Error { get; set; }
+
+    private async Task HandleSubmit()
+    {
+        var result = await Auth.ValidateLogin(Model.Login, Model.Password);
+        if (!result.Success)
+        {
+            Error = result.LockedUntil is { } locked
+                ? $"Слишком много попыток, вход заблокирован до {locked.ToLocalTime():HH:mm}"
+                : result.Error;
+            return;
+        }
+
+        if (result.RequiresTwoFactor)
+        {
+            HttpContext!.Response.Cookies.Append("FrogPlug.PendingLogin", PendingLoginTokens.Create(result.Admin!.Id, Model.Remember), new CookieOptions
+            {
+                HttpOnly = true,
+                SameSite = SameSiteMode.Strict,
+                Secure = HttpContext.Request.IsHttps,
+                MaxAge = TimeSpan.FromMinutes(5)
+            });
+            Navigation.NavigateTo("login/2fa", replace: true);
+            return;
+        }
+
+        await SignIn(result.Admin!, Model.Remember);
+        Navigation.NavigateTo("", replace: true);
+    }
+
+    private async Task SignIn(Admin admin, bool remember)
+    {
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.Name, admin.Login),
+            new Claim(ClaimTypes.NameIdentifier, admin.Id.ToString())
+        };
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var properties = new AuthenticationProperties
+        {
+            IsPersistent = remember,
+            ExpiresUtc = remember ? DateTimeOffset.UtcNow.AddDays(30) : null
+        };
+        await HttpContext!.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity), properties);
+    }
+
+    private sealed class LoginModel
+    {
+        [Required(ErrorMessage = "Укажите логин")]
+        public string Login { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Укажите пароль")]
+        public string Password { get; set; } = string.Empty;
+
+        public bool Remember { get; set; }
+    }
+}
