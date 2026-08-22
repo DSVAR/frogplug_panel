@@ -1,0 +1,16 @@
+<div class="meter" aria-label="@Label">
+    <div class="bar @ColorClass"><span style="width: @Percent%;"></span></div>
+    <b>@Percent%</b>
+</div>
+
+@code {
+    [Parameter]
+    public int Value { get; set; }
+
+    [Parameter]
+    public string Label { get; set; } = "Значение";
+
+    private int Percent => Math.Clamp(Value, 0, 100);
+
+    private string ColorClass => Percent >= 90 ? "bad" : Percent >= 70 ? "warn" : string.Empty;
+}

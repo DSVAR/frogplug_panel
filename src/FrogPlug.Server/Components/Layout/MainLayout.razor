@@ -1,0 +1,35 @@
+@using FrogPlug.Server.Components.Shared
+@inherits LayoutComponentBase
+
+<div class="admin-shell @(SidebarOpen ? "sidebar-open" : string.Empty)">
+    <aside class="sidebar">
+        <NavMenu />
+    </aside>
+    <main class="main-content">
+        <header class="top-bar">
+            <button class="menu-button" type="button" aria-label="Открыть меню" @onclick="ToggleSidebar">
+                <Icon Name="menu" />
+            </button>
+            <span class="brand-small">Панель</span>
+            <AuthorizeView>
+                <Authorized Context="auth">
+                    <span class="current-admin">@auth.User.Identity?.Name</span>
+                </Authorized>
+            </AuthorizeView>
+        </header>
+        <section class="content">
+            @Body
+        </section>
+    </main>
+</div>
+
+@code {
+    private bool SidebarOpen { get; set; }
+
+    private void ToggleSidebar()
+    {
+        SidebarOpen = !SidebarOpen;
+    }
+}
+
+<Toast />

@@ -1,0 +1,25 @@
+@using FrogPlug.Server.Services
+
+<span class="status-badge @Class">@Label</span>
+
+@code {
+    [Parameter] public ClientStatus Status { get; set; }
+
+    private string Label => Status switch
+    {
+        ClientStatus.Active => "Активен",
+        ClientStatus.Disabled => "Отключён",
+        ClientStatus.Expired => "Истёк",
+        ClientStatus.OverLimit => "Лимит",
+        _ => "—"
+    };
+
+    private string Class => Status switch
+    {
+        ClientStatus.Active => "status-active",
+        ClientStatus.Disabled => "status-disabled",
+        ClientStatus.Expired => "status-expired",
+        ClientStatus.OverLimit => "status-limit",
+        _ => string.Empty
+    };
+}

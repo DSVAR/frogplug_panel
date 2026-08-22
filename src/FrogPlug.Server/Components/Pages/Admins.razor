@@ -1,0 +1,241 @@
+@page "/admins"
+@rendermode InteractiveServer
+@using FrogPlug.Core
+@using Microsoft.AspNetCore.Components.Authorization
+@using FrogPlug.Server.Components.Shared
+@inject FrogPlug.Server.Data.AppDbContext Db
+@inject FrogPlug.Server.Services.AdminAuthService Auth
+@inject FrogPlug.Server.Services.SettingsService Settings
+@inject NavigationManager Navigation
+
+<PageTitle>Администраторы</PageTitle>
+<h1>Администраторы</h1>
+
+@if (!string.IsNullOrWhiteSpace(Error))
+{
+    <div class="form-error">@Error</div>
+}
+
+<div class="panel-grid">
+    <section class="panel">
+        <h2>Добавить администратора</h2>
+        <EditForm Model="NewAdmin" OnValidSubmit="AddAdmin" FormName="add-admin" Enhance>
+            <DataAnnotationsValidator />
+            <div class="form-field"><label>Логин</label><InputText @bind-Value="NewAdmin.Login" /><ValidationMessage For="@(() => NewAdmin.Login)" /></div>
+            <div class="form-field">
+                <label>Пароль</label>
+                <InputText type="password" @bind-Value="NewAdmin.Password" />
+                <ValidationMessage For="@(() => NewAdmin.Password)" />
+            </div>
+            <button class="primary-button" type="submit">Добавить</button>
+        </EditForm>
+    </section>
+    <section class="panel">
+        <h2>Сменить свой пароль</h2>
+        <EditForm Model="PasswordChange" OnValidSubmit="ChangeOwnPassword" FormName="change-password" Enhance>
+            <DataAnnotationsValidator />
+            <div class="form-field"><label>Текущий пароль</label><InputText type="password" @bind-Value="PasswordChange.CurrentPassword" /></div>
+            <div class="form-field">
+                <label>Новый пароль</label>
+                <InputText type="password" @bind-Value="PasswordChange.NewPassword" />
+                <ValidationMessage For="@(() => PasswordChange.NewPassword)" />
+            </div>
+            <button class="primary-button" type="submit">Изменить пароль</button>
+        </EditForm>
+    </section>
+</div>
+
+<section class="panel">
+    <h2>Двухфакторная аутентификация</h2>
+    @if (OwnAdmin?.TotpSecret is null)
+    {
+        <p>Защитите вход одноразовыми кодами из приложения-аутентификатора.</p>
+        <button class="secondary-button" type="button" @onclick="OpenEnableTwoFactor">Включить 2FA</button>
+    }
+    else
+    {
+        <p>Двухфакторная аутентификация включена.</p>
+        <button class="danger-button" type="button" @onclick="OpenDisableTwoFactor">Отключить 2FA</button>
+    }
+</section>
+
+<section class="panel">
+    <h2>Список администраторов</h2>
+    <table class="data-table">
+        <thead><tr><th>Логин</th><th>Создан</th><th>Статус</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var admin in AdminList)
+            {
+                <tr>
+                    <td>@admin.Login</td><td>@admin.CreatedAt.ToLocalTime().ToString("g")</td><td>@(admin.IsActive ? "Активен" : "Отключён")</td>
+                    <td>
+                        @if (admin.IsActive && admin.Login != CurrentLogin)
+                        {
+                            <form method="post" action="admins/deactivate">
+                                <AntiforgeryToken /><input type="hidden" name="id" value="@admin.Id" />
+                                <button class="danger-button" type="submit">Деактивировать</button>
+                            </form>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</section>
+
+<Modal Title="Включить двухфакторную аутентификацию" Visible="EnableTwoFactorVisible" OnClose="CloseTwoFactorModals">
+    <Body>
+        <p>Отсканируйте QR-код в приложении-аутентификаторе, затем подтвердите кодом.</p>
+        @if (!string.IsNullOrWhiteSpace(PendingTotpSecret))
+        {
+            <div class="qr-code">@((MarkupString)QrSvg.Generate(Totp.ProvisioningUri(ProfileTitle, CurrentLogin!, PendingTotpSecret)))</div>
+            <CopyField Label="Секрет для ручного ввода" Value="@PendingTotpSecret" />
+        }
+        <EditForm Model="EnableTwoFactor" OnValidSubmit="EnableTwoFactorAsync" FormName="enable-2fa">
+            <div class="form-field">
+                <label for="enable-totp-code">Код</label>
+                <InputText id="enable-totp-code" @bind-Value="EnableTwoFactor.Code" inputmode="numeric" autocomplete="one-time-code" />
+            </div>
+            <button class="primary-button" type="submit">Подтвердить</button>
+        </EditForm>
+    </Body>
+</Modal>
+
+<Modal Title="Отключить двухфакторную аутентификацию" Visible="DisableTwoFactorVisible" OnClose="CloseTwoFactorModals">
+    <Body>
+        <EditForm Model="DisableTwoFactor" OnValidSubmit="DisableTwoFactorAsync" FormName="disable-2fa">
+            <div class="form-field">
+                <label for="disable-totp-password">Текущий пароль</label>
+                <InputText id="disable-totp-password" type="password" @bind-Value="DisableTwoFactor.Password" autocomplete="current-password" />
+            </div>
+            <div class="form-field">
+                <label for="disable-totp-code">Код</label>
+                <InputText id="disable-totp-code" @bind-Value="DisableTwoFactor.Code" inputmode="numeric" autocomplete="one-time-code" />
+            </div>
+            <button class="danger-button" type="submit">Отключить 2FA</button>
+        </EditForm>
+    </Body>
+</Modal>
+
+@code {
+    private List<Admin> AdminList = [];
+    private string? CurrentLogin;
+    private string ProfileTitle { get; set; } = "VPN";
+    private string? Error;
+    private NewAdminModel NewAdmin { get; set; } = new();
+    private PasswordChangeModel PasswordChange { get; set; } = new();
+    private Admin? OwnAdmin { get; set; }
+    private string? PendingTotpSecret { get; set; }
+    private bool EnableTwoFactorVisible { get; set; }
+    private bool DisableTwoFactorVisible { get; set; }
+    private EnableTwoFactorModel EnableTwoFactor { get; set; } = new();
+    private DisableTwoFactorModel DisableTwoFactor { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        CurrentLogin = authState.User.Identity?.Name;
+        ProfileTitle = await Settings.GetProfileTitle();
+        OwnAdmin = await Db.Admins.SingleOrDefaultAsync(item => item.Login == CurrentLogin);
+        await LoadAdmins();
+    }
+
+    [Inject]
+    private AuthenticationStateProvider AuthenticationStateProvider { get; set; } = default!;
+
+    private async Task LoadAdmins()
+    {
+        AdminList = await Db.Admins.AsNoTracking().OrderBy(admin => admin.Login).ToListAsync();
+    }
+
+    private async Task AddAdmin()
+    {
+        try
+        {
+            await Auth.CreateAdmin(NewAdmin.Login, NewAdmin.Password, CurrentLogin!);
+            Navigation.NavigateTo("admins", replace: true);
+        }
+        catch (ArgumentException exception) { Error = exception.Message; }
+        catch (InvalidOperationException exception) { Error = exception.Message; }
+    }
+
+    private async Task ChangeOwnPassword()
+    {
+        var admin = await Db.Admins.SingleAsync(item => item.Login == CurrentLogin);
+        if (!await Auth.ChangePassword(admin, PasswordChange.CurrentPassword, PasswordChange.NewPassword))
+        {
+            Error = "Текущий пароль указан неверно";
+            return;
+        }
+        Navigation.NavigateTo("admins", replace: true);
+    }
+
+    private void OpenEnableTwoFactor()
+    {
+        PendingTotpSecret = Totp.GenerateSecret();
+        EnableTwoFactor = new EnableTwoFactorModel();
+        EnableTwoFactorVisible = true;
+    }
+
+    private void OpenDisableTwoFactor()
+    {
+        DisableTwoFactor = new DisableTwoFactorModel();
+        DisableTwoFactorVisible = true;
+    }
+
+    private Task CloseTwoFactorModals()
+    {
+        EnableTwoFactorVisible = false;
+        DisableTwoFactorVisible = false;
+        PendingTotpSecret = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task EnableTwoFactorAsync()
+    {
+        if (OwnAdmin is null || PendingTotpSecret is null
+            || !await Auth.EnableTwoFactor(OwnAdmin, PendingTotpSecret, EnableTwoFactor.Code))
+        {
+            Error = "Неверный код подтверждения";
+            return;
+        }
+
+        await CloseTwoFactorModals();
+    }
+
+    private async Task DisableTwoFactorAsync()
+    {
+        if (OwnAdmin is null || !await Auth.DisableTwoFactor(OwnAdmin, DisableTwoFactor.Password, DisableTwoFactor.Code))
+        {
+            Error = "Неверный пароль или код подтверждения";
+            return;
+        }
+
+        await CloseTwoFactorModals();
+    }
+
+    private sealed class NewAdminModel
+    {
+        [Required(ErrorMessage = "Укажите логин")] public string Login { get; set; } = string.Empty;
+        [Required(ErrorMessage = "Укажите пароль")] public string Password { get; set; } = string.Empty;
+    }
+
+    private sealed class PasswordChangeModel
+    {
+        [Required(ErrorMessage = "Укажите текущий пароль")] public string CurrentPassword { get; set; } = string.Empty;
+        [Required(ErrorMessage = "Укажите новый пароль")]
+        [MinLength(10, ErrorMessage = "Пароль должен быть не короче 10 символов")]
+        public string NewPassword { get; set; } = string.Empty;
+    }
+
+    private sealed class EnableTwoFactorModel
+    {
+        public string Code { get; set; } = string.Empty;
+    }
+
+    private sealed class DisableTwoFactorModel
+    {
+        public string Password { get; set; } = string.Empty;
+        public string Code { get; set; } = string.Empty;
+    }
+}

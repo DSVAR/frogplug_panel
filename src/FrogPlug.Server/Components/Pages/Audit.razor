@@ -1,0 +1,147 @@
+@page "/audit"
+@rendermode InteractiveServer
+@using FrogPlug.Server.Data
+@using FrogPlug.Server.Services
+@inject AppDbContext Db
+
+<PageTitle>Журнал</PageTitle>
+<PageHeader Title="Журнал" Subtitle="Действия администраторов и системные события" />
+
+<section class="panel">
+    <div class="audit-filters">
+        <div class="form-field">
+            <label for="audit-action">Действие</label>
+            <select id="audit-action" class="form-control" @bind="Action">
+                <option value="">Все действия</option>
+                @foreach (var action in ActionOptions)
+                {
+                    <option value="@action.Code">@action.Label</option>
+                }
+            </select>
+        </div>
+        <div class="form-field">
+            <label for="audit-admin">Администратор</label>
+            <select id="audit-admin" class="form-control" @bind="Admin">
+                <option value="">Все администраторы</option>
+                @foreach (var admin in Admins)
+                {
+                    <option value="@admin">@admin</option>
+                }
+            </select>
+        </div>
+        <div class="form-field">
+            <label for="audit-date">Дата</label>
+            <InputDate id="audit-date" class="form-control" @bind-Value="Date" />
+        </div>
+        <button class="btn" type="button" @onclick="Apply">Применить</button>
+    </div>
+
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Время</th>
+                    <th>Администратор</th>
+                    <th>Действие</th>
+                    <th>Подробности</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var entry in Entries)
+                {
+                    <tr>
+                        <td>@entry.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        <td>@entry.AdminLogin</td>
+                        <td><span class="chip @AuditLabels.CssClass(entry.Action)">@AuditLabels.Get(entry.Action)</span></td>
+                        <td>@(entry.Details ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="table-footer">
+        <span>Показано @Entries.Count из @Total</span>
+        <div class="pager">
+            <button class="icon-button" type="button" disabled="@(Page == 1)" @onclick="PreviousPage">←</button>
+            <span>@Page / @TotalPages</span>
+            <button class="icon-button"
+                    type="button"
+                    disabled="@(Page == TotalPages)"
+                    @onclick="NextPage">→</button>
+        </div>
+    </div>
+</section>
+
+@code {
+    private const int PageSize = 50;
+    private List<AuditLog> Entries { get; set; } = [];
+    private List<string> Admins { get; set; } = [];
+    private string Action { get; set; } = string.Empty;
+    private string Admin { get; set; } = string.Empty;
+    private DateTime? Date { get; set; }
+    private int Page { get; set; } = 1;
+    private int Total { get; set; }
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(Total / (double)PageSize));
+    private IReadOnlyList<AuditActionOption> ActionOptions { get; } = AuditLabels.Codes
+        .Order()
+        .Select(action => new AuditActionOption(action, AuditLabels.Get(action)))
+        .ToArray();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Admins = await Db.AuditLogs.AsNoTracking()
+            .Select(item => item.AdminLogin)
+            .Distinct()
+            .OrderBy(item => item)
+            .ToListAsync();
+        await Load();
+    }
+
+    private async Task Apply()
+    {
+        Page = 1;
+        await Load();
+    }
+
+    private async Task PreviousPage()
+    {
+        Page = Math.Max(1, Page - 1);
+        await Load();
+    }
+
+    private async Task NextPage()
+    {
+        Page = Math.Min(TotalPages, Page + 1);
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        var query = Db.AuditLogs.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(Action))
+        {
+            query = query.Where(item => item.Action == Action);
+        }
+
+        if (!string.IsNullOrWhiteSpace(Admin))
+        {
+            query = query.Where(item => item.AdminLogin == Admin);
+        }
+
+        if (Date is not null)
+        {
+            var start = Date.Value.Date.ToUniversalTime();
+            var end = start.AddDays(1);
+            query = query.Where(item => item.At >= start && item.At < end);
+        }
+
+        Total = await query.CountAsync();
+        Entries = await query.OrderByDescending(item => item.At)
+            .Skip((Page - 1) * PageSize)
+            .Take(PageSize)
+            .ToListAsync();
+    }
+
+    private sealed record AuditActionOption(string Code, string Label);
+}

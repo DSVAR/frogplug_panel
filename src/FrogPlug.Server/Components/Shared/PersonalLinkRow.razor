@@ -1,0 +1,30 @@
+@using FrogPlug.Core
+<div class="link-row">
+    <div class="link-row-head">
+        <span class="chip">@Badge</span>
+        <strong>@Title</strong>
+        @if (!string.IsNullOrWhiteSpace(CountryCode))
+        {
+            <CountryBadge Country="@CountryCode" />
+        }
+    </div>
+    <CopyField Value="@Link" />
+    <details class="link-row-qr">
+        <summary>Показать QR-код</summary>
+        <div class="link-qr">@((MarkupString)QrSvg.Generate(Link))</div>
+    </details>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Badge { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? CountryCode { get; set; }
+
+    [Parameter, EditorRequired]
+    public string Link { get; set; } = string.Empty;
+}

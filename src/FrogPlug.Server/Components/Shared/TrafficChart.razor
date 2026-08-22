@@ -1,0 +1,51 @@
+@using System.Globalization
+@using FrogPlug.Server.Services
+
+<svg class="traffic-chart" viewBox="0 0 720 240" role="img" aria-label="Трафик за 24 часа">
+    <defs>
+        <linearGradient id="traffic-up-fill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#d63b30" stop-opacity=".34" />
+            <stop offset="100%" stop-color="#d63b30" stop-opacity="0" />
+        </linearGradient>
+        <linearGradient id="traffic-down-fill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#5b8def" stop-opacity=".30" />
+            <stop offset="100%" stop-color="#5b8def" stop-opacity="0" />
+        </linearGradient>
+    </defs>
+    @foreach (var label in Labels.Select((value, index) => new { value, index }))
+    {
+        <svg:text x="0" y="@(20 + label.index * 90)">@label.value</svg:text>
+    }
+    <path class="traffic-area traffic-down-area" d="@DownArea" />
+    <path class="traffic-area traffic-up-area" d="@UpArea" />
+    <path class="traffic-down" d="@DownLine" />
+    <path class="traffic-up" d="@UpLine" />
+    @foreach (var point in ChartPoints.Where(item => item.Hour.Hour % 3 == 0))
+    {
+        <svg:text x="@Coordinate(point.X)" y="238">@point.Hour.ToLocalTime().ToString("HH:mm")</svg:text>
+    }
+</svg>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<TrafficHourPoint> Values { get; set; } = [];
+
+    private long Maximum => Math.Max(
+        Values.Select(item => Math.Max(item.UpBytes, item.DownBytes)).DefaultIfEmpty(0).Max(),
+        TrafficChartData.MinimumScale);
+    private IReadOnlyList<ChartPoint> ChartPoints => TrafficChartData.Points(Values, Maximum, 650, 190);
+    private IReadOnlyList<string> Labels => TrafficChartData.Axis(Maximum);
+    private string UpLine => TrafficChartData.SmoothPath(UpPoints, Coordinate);
+    private string DownLine => TrafficChartData.SmoothPath(DownPoints, Coordinate);
+    private string UpArea => TrafficChartData.AreaPath(UpPoints, 210, Coordinate);
+    private string DownArea => TrafficChartData.AreaPath(DownPoints, 210, Coordinate);
+    private IEnumerable<(double X, double Y)> UpPoints =>
+        ChartPoints.Select(item => (item.X + 65, item.UpY + 20));
+    private IEnumerable<(double X, double Y)> DownPoints =>
+        ChartPoints.Select(item => (item.X + 65, item.DownY + 20));
+
+    private static string Coordinate(double value)
+    {
+        return value.ToString("0.#", CultureInfo.InvariantCulture);
+    }
+}

@@ -1,0 +1,31 @@
+@inject IJSRuntime Js
+
+<div class="copy-field">
+    @if (!string.IsNullOrWhiteSpace(Label))
+    {
+        <label for="@InputId">@Label</label>
+    }
+    <div class="copy-field-controls">
+        <input id="@InputId" class="form-control" readonly value="@Value" aria-label="Значение для копирования" />
+        <button class="secondary-button" type="button" @onclick="Copy">@(Copied ? "Скопировано" : "Копировать")</button>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public string? Label { get; set; }
+
+    [Parameter]
+    public string? Value { get; set; }
+
+    private bool Copied { get; set; }
+    private string InputId { get; } = $"copy-field-{Guid.NewGuid():N}";
+
+    private async Task Copy()
+    {
+        await Js.InvokeVoidAsync("fluxClipboard.copy", Value ?? string.Empty);
+        Copied = true;
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        Copied = false;
+    }
+}

@@ -1,0 +1,53 @@
+@inject FrogPlug.Server.Services.NodeService Nodes
+@inject FrogPlug.Server.Services.ClientUserService Users
+
+<div class="sidebar-brand">
+    <span class="ava"><Icon Name="overview" /></span>
+    <a class="brand-link" href="./">
+        <span class="brand-name">FrogPlug Panel</span>
+        <span class="brand-sub">Xray · @NodeCount @Plural.Ru(NodeCount, "нода", "ноды", "нод")</span>
+    </a>
+</div>
+<nav class="sidebar-nav">
+    <NavLink href="" Match="NavLinkMatch.All"><Icon Name="overview" />Обзор</NavLink>
+    <NavLink href="users"><Icon Name="users" />Пользователи <span class="nav-count">@UserCount</span></NavLink>
+    <NavLink href="nodes"><Icon Name="nodes" />Ноды <span class="nav-count">@NodeCount</span></NavLink>
+    <NavLink href="routing"><Icon Name="routing" />Маршрутизация</NavLink>
+    <NavLink href="whitelist"><Icon Name="whitelist" />Белые списки</NavLink>
+    <NavLink href="mtproto"><Icon Name="mtproto" />MTProto</NavLink>
+    <span class="nav-section">Система</span>
+    <NavLink href="admins"><Icon Name="admins" />Администраторы</NavLink>
+    <NavLink href="audit"><Icon Name="audit" />Журнал</NavLink>
+    <NavLink href="settings"><Icon Name="settings" />Настройки</NavLink>
+</nav>
+<AuthorizeView>
+    <Authorized Context="auth">
+        <div class="side-foot">
+            <span class="ava">@Initial(auth.User.Identity?.Name)</span>
+            <div class="side-admin">
+                <strong>@auth.User.Identity?.Name</strong>
+                <span class="brand-sub">Владелец</span>
+            </div>
+            <form method="post" action="logout">
+                <AntiforgeryToken />
+                <button class="icon-button" type="submit" aria-label="Выйти"><Icon Name="logout" /></button>
+            </form>
+        </div>
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    private int NodeCount { get; set; }
+    private int UserCount { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        NodeCount = (await Nodes.List()).Count;
+        UserCount = (await Users.List()).Count;
+    }
+
+    private static string Initial(string? login)
+    {
+        return string.IsNullOrWhiteSpace(login) ? "А" : login[..1].ToUpperInvariant();
+    }
+}

@@ -1,0 +1,12 @@
+<span class="country-badge" title="@Title">@Code</span>
+
+@code {
+    [Parameter]
+    public string? Country { get; set; }
+
+    private string Code => string.IsNullOrWhiteSpace(Country)
+        ? "—"
+        : Country.Trim().ToUpperInvariant();
+
+    private string Title => $"Страна: {Code}";
+}

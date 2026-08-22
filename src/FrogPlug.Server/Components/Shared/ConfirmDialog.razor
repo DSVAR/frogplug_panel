@@ -1,0 +1,20 @@
+<Modal Title="Подтверждение" Visible="Visible" OnClose="Cancel">
+    <Body>
+        <p>@Text</p>
+    </Body>
+    <Footer>
+        <button class="secondary-button" type="button" @onclick="Cancel">Отмена</button>
+        <button class="danger-button filled" type="button" @onclick="Confirm">Подтвердить</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public string Text { get; set; } = "Вы уверены?";
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+
+    private Task Cancel() => OnCancel.InvokeAsync();
+
+    private Task Confirm() => OnConfirm.InvokeAsync();
+}

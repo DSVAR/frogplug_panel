@@ -1,0 +1,11 @@
+@implements IDisposable
+@inject ToastService Service
+@if (!string.IsNullOrWhiteSpace(Service.Message))
+{
+    <div class="toast @(Service.IsError ? "toast-error" : "toast-success")">@Service.Message</div>
+}
+@code {
+    protected override void OnInitialized() => Service.Changed += Refresh;
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Service.Changed -= Refresh;
+}

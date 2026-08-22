@@ -1,0 +1,585 @@
+@page "/users"
+@rendermode InteractiveServer
+@implements IDisposable
+@using FrogPlug.Server.Components.Shared
+@using FrogPlug.Server.Services
+@inject ClientUserService Service
+@inject SettingsService Settings
+@inject PublicLinkOptions PublicLinks
+@inject NavigationManager Navigation
+@inject IJSRuntime Js
+
+<PageTitle>Пользователи</PageTitle>
+
+<div class="page-heading">
+    <div>
+        <h1>Пользователи</h1>
+        <p class="muted">Управление доступом и подписками</p>
+    </div>
+    <button class="primary-button" type="button" @onclick="OpenCreate">
+        <Icon Name="plus" /> Добавить пользователя
+    </button>
+</div>
+<div class="stat-grid">
+    <StatCard Label="Всего" Value="@AllItems.Count.ToString()" Icon="users" Hint="всего в базе" />
+    <StatCard Label="Активны" Value="@ActiveCount.ToString()" Icon="check" Hint="доступ включён" />
+    <StatCard Label="Истекают" Value="@ExpiringCount.ToString()" Icon="clock" Hint="за 7 дней" />
+    <StatCard Label="Онлайн" Value="@OnlineCount.ToString()" Icon="activity" Hint="за последние 5 минут" />
+</div>
+<div class="toolbar">
+    <div class="input-with-icon toolbar-search">
+        <Icon Name="search" />
+        <input class="form-control" placeholder="Поиск по имени или заметке"
+               aria-label="Поиск по имени или заметке" @bind="Search" @bind:event="oninput" @bind:after="ResetPage" />
+    </div>
+    <select class="form-control toolbar-filter" value="@StatusFilter" @onchange="StatusChanged">
+        <option value="">Все статусы</option>
+        <option value="Active">Активные</option>
+        <option value="Disabled">Отключённые</option>
+        <option value="Expired">Истёкшие</option>
+        <option value="OverLimit">Превышен лимит</option>
+        <option value="expiring">Истекают за 7 дней</option>
+    </select>
+</div>
+<section class="panel table-wrap">
+    <table class="data-table users-table">
+        <thead>
+            <tr>
+                <th>Пользователь</th>
+                <th>Доступ</th>
+                <th>Действует до</th>
+                <th>Трафик</th>
+                <th>Статус</th>
+                <th>Включён</th>
+                <th aria-label="Действия"></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var user in PageData.Items)
+            {
+                <tr>
+                    <td class="user-cell">
+                        <strong>@user.Name</strong>
+                        @if (!string.IsNullOrWhiteSpace(user.Note))
+                        {
+                            <small>@user.Note</small>
+                        }
+                    </td>
+                    <td>
+                        <div class="chips">
+                            @if (user.AllowReality)
+                            {
+                                <span class="chip p-reality">Reality</span>
+                            }
+                            @if (user.AllowXhttp)
+                            {
+                                <span class="chip p-xhttp">XHTTP</span>
+                            }
+                            @if (user.AllowWhitelist)
+                            {
+                                <span class="chip p-wl">Белые списки</span>
+                            }
+                            @if (user.AllowMtproto)
+                            {
+                                <span class="chip p-mtp">MTProto</span>
+                            }
+                        </div>
+                    </td>
+                    <td>
+                        <strong>@Format.Date(user.ExpiresAt)</strong>
+                        <small>@Format.RelativeDays(user.ExpiresAt, DateTime.UtcNow)</small>
+                    </td>
+                    <td class="traffic-cell">
+                        <span>@Format.Bytes(UsedTraffic(user)) / @TrafficLimit(user)</span>
+                        <Meter Value="@TrafficPercent(user)" Label="Использовано трафика" />
+                    </td>
+                    <td><StatusBadge Status="ClientUserService.GetStatus(user, DateTime.UtcNow)" /></td>
+                    <td><Toggle Value="@user.IsEnabled" ValueChanged="@(_ => Toggle(user))" /></td>
+                    <td class="actions-cell">
+                        <div class="action-buttons">
+                            <button class="icon-button" type="button" title="QR и ссылка" @onclick="(() => OpenLinks(user))"><Icon Name="qr" /></button>
+                            <button class="icon-button" type="button" title="Изменить" @onclick="(() => OpenEdit(user))"><Icon Name="edit" /></button>
+                            <button id="user-menu-@user.Id" class="icon-button" type="button" title="Дополнительные действия"
+                                    aria-expanded="@(MenuUserId == user.Id)" @onclick="(() => ToggleMenu(user.Id))">⋯</button>
+                        </div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (PageData.TotalCount == 0)
+    {
+        <p class="empty-state">Пользователи не найдены.</p>
+    }
+    <div class="table-footer">
+        <span>Показано @PageData.Items.Count из @PageData.TotalCount</span>
+        <label for="page-size">На странице</label>
+        <select id="page-size" class="page-size" value="@PageSize" @onchange="PageSizeChanged">
+            <option value="10">10</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+        </select>
+        <div class="pager" aria-label="Страницы">
+            <button class="small-button" disabled="@(PageData.Page == 1)" @onclick="PreviousPage">←</button>
+            @for (var number = 1; number <= PageData.TotalPages; number++)
+            {
+                var pageNumber = number;
+                <button class="small-button @(pageNumber == PageData.Page ? "active-page" : string.Empty)"
+                        @onclick="(() => GoToPage(pageNumber))">@pageNumber</button>
+            }
+            <button class="small-button" disabled="@(PageData.Page == PageData.TotalPages)" @onclick="NextPage">→</button>
+        </div>
+    </div>
+</section>
+@if (MenuUser is { } menuUser)
+{
+    <div id="user-menu-backdrop" class="popover-backdrop" tabindex="0"
+         @onclick="CloseMenu" @onkeydown="HandleMenuKeyDown"></div>
+    <div id="user-action-menu" class="action-menu action-menu-fixed" style="@MenuPosition" role="menu"
+         @onkeydown="HandleMenuKeyDown">
+        <button type="button" role="menuitem" @onclick="(() => Extend(menuUser))">+30 дней</button>
+        <button type="button" role="menuitem" @onclick="(() => Reset(menuUser))">Сбросить трафик</button>
+        <button type="button" role="menuitem" @onclick="(() => RegenerateToken(menuUser))">Перевыпустить ссылку</button>
+        <button type="button" role="menuitem" @onclick="(() => RegenerateUuid(menuUser))">Перевыпустить UUID</button>
+        <button class="danger" type="button" role="menuitem" @onclick="(() => AskDelete(menuUser))">Удалить</button>
+    </div>
+}
+<Modal Title="@(EditingId is null ? "Новый пользователь" : "Изменить пользователя")"
+       Visible="EditVisible"
+       OnClose="CloseEdit">
+    <Body>
+        <EditForm Model="Form" OnValidSubmit="Save">
+            <DataAnnotationsValidator />
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="user-name">Имя</label>
+                    <InputText id="user-name" class="form-control" @bind-Value="Form.Name" />
+                    <ValidationMessage For="@(() => Form.Name)" />
+                </div>
+                <div class="form-field">
+                    <label for="user-note">Заметка</label>
+                    <InputText id="user-note" class="form-control" @bind-Value="Form.Note" />
+                </div>
+                <div class="form-field">
+                    <label for="user-expires">Срок действия</label>
+                    <InputDate id="user-expires" class="form-control" disabled="@Form.UnlimitedExpiry"
+                               @bind-Value="Form.ExpiresAt" />
+                    <label class="custom-check-field" for="user-unlimited-expiry">
+                        <input id="user-unlimited-expiry" class="custom-checkbox" type="checkbox"
+                               @bind="Form.UnlimitedExpiry" /> Бессрочно
+                    </label>
+                </div>
+                <div class="form-field">
+                    <label for="user-traffic">Лимит трафика, ГБ</label>
+                    <InputNumber id="user-traffic" class="form-control" disabled="@Form.UnlimitedTraffic"
+                                 @bind-Value="Form.TrafficGb" />
+                    <label class="custom-check-field" for="user-unlimited-traffic">
+                        <input id="user-unlimited-traffic" class="custom-checkbox" type="checkbox"
+                               @bind="Form.UnlimitedTraffic" /> Без лимита
+                    </label>
+                </div>
+            </div>
+            <section class="settings-block" aria-labelledby="user-protocols-title">
+                <h3 id="user-protocols-title">Протоколы</h3>
+                <div class="settings-row">
+                    <div><strong>Reality</strong><small>основной протокол, маскировка под чужой сайт</small></div>
+                    <Toggle Value="@Form.AllowReality" ValueChanged="@(value => Form.AllowReality = value)" />
+                </div>
+                <div class="settings-row">
+                    <div><strong>XHTTP</strong><small>через домен ноды и CDN-совместимый HTTP</small></div>
+                    <Toggle Value="@Form.AllowXhttp" ValueChanged="@(value => Form.AllowXhttp = value)" />
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <strong>Белые списки (OpenFlux)</strong>
+                        <small>доступ через приложения OpenFlux при блокировках</small>
+                    </div>
+                    <Toggle Value="@Form.AllowWhitelist" ValueChanged="@(value => Form.AllowWhitelist = value)" />
+                </div>
+                <div class="settings-row">
+                    <div><strong>MTProto</strong><small>прокси для Telegram</small></div>
+                    <Toggle Value="@Form.AllowMtproto" ValueChanged="@(value => Form.AllowMtproto = value)" />
+                </div>
+                <div class="settings-row">
+                    <div><strong>Telegram Web</strong><small>WEB-прокси Telegram через домен узла</small></div>
+                    <Toggle Value="@Form.AllowTgWeb" ValueChanged="@(value => Form.AllowTgWeb = value)" />
+                </div>
+                <div class="settings-row">
+                    <div><strong>Hysteria2</strong><small>быстрый UDP-прокси через домен узла</small></div>
+                    <Toggle Value="@Form.AllowHysteria" ValueChanged="@(value => Form.AllowHysteria = value)" />
+                </div>
+            </section>
+            @if (!string.IsNullOrWhiteSpace(Error))
+            {
+                <div class="form-error">@Error</div>
+            }
+            <div class="modal-footer">
+                <button class="secondary-button" type="button" @onclick="CloseEdit">Отмена</button>
+                <button class="primary-button" type="submit">Сохранить</button>
+            </div>
+        </EditForm>
+    </Body>
+</Modal>
+<Modal Title="QR и ссылки подписки" Visible="LinksVisible" OnClose="CloseLinks">
+    <Body>
+        <CopyField Label="Подписка" Value="@SubscriptionUrl" />
+        <CopyField Label="Личная страница" Value="@UserUrl" />
+    </Body>
+</Modal>
+<ConfirmDialog Visible="ConfirmVisible" Text="Удалить пользователя?" OnCancel="CancelConfirm" OnConfirm="RunConfirm" />
+
+@code {
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? QueryStatus { get; set; }
+
+    private List<ClientUser> AllItems = [];
+    private string Search { get; set; } = string.Empty;
+    private string StatusFilter { get; set; } = string.Empty;
+    private int Page { get; set; } = 1;
+    private int PageSize { get; set; } = 10;
+    private int? MenuUserId;
+    private string MenuPosition { get; set; } = string.Empty;
+    private bool FocusMenuBackdrop { get; set; }
+    private bool PositionMenu { get; set; }
+    private bool WatchMenu { get; set; }
+    private readonly DotNetObjectReference<Users> popoverReference;
+    private bool EditVisible;
+    private bool LinksVisible;
+    private int? EditingId;
+    private string? Error;
+    private string? SubscriptionUrl;
+    private string? UserUrl;
+    private bool ConfirmVisible;
+    private ClientUser? PendingDelete;
+    private UserForm Form { get; set; } = new();
+
+    public Users()
+    {
+        popoverReference = DotNetObjectReference.Create(this);
+    }
+
+    private UserListPage PageData => UserListQuery.Apply(
+        AllItems,
+        Search,
+        StatusFilter,
+        Page,
+        PageSize,
+        DateTime.UtcNow);
+    private int ActiveCount => AllItems.Count(
+        user => ClientUserService.GetStatus(user, DateTime.UtcNow) == ClientStatus.Active);
+    private int ExpiringCount => UserListQuery.Apply(
+        AllItems,
+        null,
+        "expiring",
+        1,
+        50,
+        DateTime.UtcNow).TotalCount;
+    private int OnlineCount => AllItems.Count(user => user.LastActivityAt >= DateTime.UtcNow.AddMinutes(-5));
+    private ClientUser? MenuUser => AllItems.FirstOrDefault(user => user.Id == MenuUserId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        StatusFilter = QueryStatus ?? string.Empty;
+        await Load();
+    }
+
+    protected override void OnParametersSet()
+    {
+        var status = QueryStatus ?? string.Empty;
+        if (StatusFilter != status)
+        {
+            StatusFilter = status;
+            Page = 1;
+        }
+    }
+
+    private async Task Load()
+    {
+        AllItems = await Service.List();
+    }
+
+    private void StatusChanged(ChangeEventArgs args)
+    {
+        var status = args.Value?.ToString() ?? string.Empty;
+        var target = string.IsNullOrEmpty(status)
+            ? "users"
+            : $"users?status={Uri.EscapeDataString(status)}";
+        Navigation.NavigateTo(target);
+    }
+
+    private void ResetPage()
+    {
+        Page = 1;
+    }
+
+    private void PageSizeChanged(ChangeEventArgs args)
+    {
+        PageSize = int.TryParse(args.Value?.ToString(), out var size) ? size : 10;
+        Page = 1;
+    }
+
+    private void PreviousPage()
+    {
+        Page = Math.Max(1, PageData.Page - 1);
+    }
+
+    private void NextPage()
+    {
+        Page = Math.Min(PageData.TotalPages, PageData.Page + 1);
+    }
+
+    private void GoToPage(int page)
+    {
+        Page = page;
+    }
+
+    private async Task ToggleMenu(int userId)
+    {
+        if (MenuUserId == userId)
+        {
+            CloseMenu();
+            return;
+        }
+
+        MenuUserId = userId;
+        MenuPosition = string.Empty;
+        FocusMenuBackdrop = true;
+        PositionMenu = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (PositionMenu && MenuUserId is { } menuUserId)
+        {
+            PositionMenu = false;
+            var position = await Js.InvokeAsync<MenuPopoverPosition>(
+                "fluxPopover.getPosition",
+                $"user-menu-{menuUserId}",
+                "user-action-menu");
+            MenuPosition = FormattableString.Invariant($"left: {position.Left:0.##}px; top: {position.Top:0.##}px;");
+            WatchMenu = true;
+            await InvokeAsync(StateHasChanged);
+        }
+
+        if (WatchMenu)
+        {
+            WatchMenu = false;
+            await Js.InvokeVoidAsync("fluxPopover.watch", popoverReference);
+        }
+
+        if (FocusMenuBackdrop)
+        {
+            FocusMenuBackdrop = false;
+            await Js.InvokeVoidAsync("fluxPopover.focus", "user-menu-backdrop");
+        }
+    }
+
+    private void CloseMenu()
+    {
+        MenuUserId = null;
+        MenuPosition = string.Empty;
+        PositionMenu = false;
+        _ = Js.InvokeVoidAsync("fluxPopover.unwatch", popoverReference);
+    }
+
+    [JSInvokable]
+    public void CloseMenuFromViewport()
+    {
+        CloseMenu();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleMenuKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            CloseMenu();
+        }
+    }
+
+    private void OpenCreate()
+    {
+        EditingId = null;
+        Form = new UserForm
+        {
+            ExpiresAt = DateTime.Today.AddMonths(1),
+            AllowReality = true,
+            AllowXhttp = true
+        };
+        Error = null;
+        EditVisible = true;
+    }
+
+    private void OpenEdit(ClientUser user)
+    {
+        EditingId = user.Id;
+        Form = new UserForm
+        {
+            Name = user.Name,
+            Note = user.Note,
+            ExpiresAt = user.ExpiresAt?.ToLocalTime().Date,
+            UnlimitedExpiry = user.ExpiresAt is null,
+            TrafficGb = user.TrafficLimitBytes / (1024d * 1024 * 1024),
+            UnlimitedTraffic = user.TrafficLimitBytes is null,
+            AllowReality = user.AllowReality,
+            AllowXhttp = user.AllowXhttp,
+            AllowWhitelist = user.AllowWhitelist,
+            AllowMtproto = user.AllowMtproto,
+            AllowTgWeb = user.AllowTgWeb,
+            AllowHysteria = user.AllowHysteria
+        };
+        Error = null;
+        EditVisible = true;
+    }
+
+    private async Task Save()
+    {
+        try
+        {
+            var expiry = Form.UnlimitedExpiry ? null : Form.ExpiresAt?.ToUniversalTime();
+            var limit = Form.UnlimitedTraffic || Form.TrafficGb is null ? null : (long?)(Form.TrafficGb.Value * 1024 * 1024 * 1024);
+            var input = new ClientUserInput(
+                Form.Name,
+                Form.Note,
+                true,
+                expiry,
+                limit,
+                Form.AllowReality,
+                Form.AllowXhttp,
+                Form.AllowWhitelist,
+                Form.AllowMtproto,
+                Form.AllowTgWeb,
+                Form.AllowHysteria);
+            if (EditingId is null)
+            {
+                await Service.Create(input);
+            }
+            else
+            {
+                await Service.Update(EditingId.Value, input);
+            }
+            EditVisible = false;
+            await Load();
+        }
+        catch (Exception exception) when (exception is ValidationException or KeyNotFoundException)
+        {
+            Error = exception.Message;
+        }
+    }
+
+    private async Task Toggle(ClientUser user)
+    {
+        await Service.ToggleEnabled(user.Id);
+        await Load();
+    }
+
+    private async Task Extend(ClientUser user)
+    {
+        await Service.ExtendDays(user.Id, 30);
+        MenuUserId = null;
+        await Load();
+    }
+
+    private async Task Reset(ClientUser user)
+    {
+        await Service.ResetTraffic(user.Id);
+        MenuUserId = null;
+        await Load();
+    }
+
+    private async Task RegenerateToken(ClientUser user)
+    {
+        await Service.RegenerateToken(user.Id);
+        MenuUserId = null;
+        await Load();
+    }
+
+    private async Task RegenerateUuid(ClientUser user)
+    {
+        await Service.RegenerateUuid(user.Id);
+        MenuUserId = null;
+        await Load();
+    }
+
+    private async Task Delete(ClientUser user)
+    {
+        await Service.Delete(user.Id);
+        CloseMenu();
+        await Load();
+    }
+
+    private async Task OpenLinks(ClientUser user)
+    {
+        var baseUrl = await Settings.GetPublicBaseUrl() ?? Navigation.BaseUri.TrimEnd('/');
+        baseUrl = PublicLinks.GetSubscriptionBaseUrl(baseUrl);
+        SubscriptionUrl = $"{baseUrl}/sub/{user.SubscriptionToken}";
+        UserUrl = $"{baseUrl}/u/{user.SubscriptionToken}";
+        LinksVisible = true;
+    }
+
+    private void AskDelete(ClientUser user)
+    {
+        PendingDelete = user;
+        MenuUserId = null;
+        ConfirmVisible = true;
+    }
+
+    private void CancelConfirm()
+    {
+        ConfirmVisible = false;
+        PendingDelete = null;
+    }
+
+    private async Task RunConfirm()
+    {
+        ConfirmVisible = false;
+        if (PendingDelete is not null)
+        {
+            await Delete(PendingDelete);
+        }
+
+        PendingDelete = null;
+    }
+    private static long UsedTraffic(ClientUser user) => user.UsedUploadBytes + user.UsedDownloadBytes;
+    private static string TrafficLimit(ClientUser user) => user.TrafficLimitBytes is null ? "∞" : Format.Bytes(user.TrafficLimitBytes.Value);
+    private static int TrafficPercent(ClientUser user)
+    {
+        return user.TrafficLimitBytes is { } limit && limit > 0
+            ? (int)Math.Min(100, UsedTraffic(user) * 100 / limit)
+            : 0;
+    }
+
+    private void CloseEdit()
+    {
+        EditVisible = false;
+    }
+
+    private void CloseLinks()
+    {
+        LinksVisible = false;
+    }
+
+    public void Dispose()
+    {
+        popoverReference.Dispose();
+    }
+
+    private sealed record MenuPopoverPosition(double Left, double Top);
+
+    private sealed class UserForm
+    {
+        [Required(ErrorMessage = "Укажите имя")]
+        public string Name { get; set; } = string.Empty;
+        public string? Note { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public bool UnlimitedExpiry { get; set; }
+        public double? TrafficGb { get; set; }
+        public bool UnlimitedTraffic { get; set; }
+        public bool AllowReality { get; set; } = true;
+        public bool AllowXhttp { get; set; } = true;
+        public bool AllowWhitelist { get; set; }
+        public bool AllowMtproto { get; set; }
+        public bool AllowTgWeb { get; set; }
+        public bool AllowHysteria { get; set; }
+    }
+}
