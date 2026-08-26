@@ -1,0 +1,80 @@
+@page "/nodes/{Id:int}"
+@rendermode InteractiveServer
+@using FrogPlug.Server.Services
+@inject NodeService Nodes
+@inject NodeSyncService Sync
+@inject AppDbContext Db
+@inject ToastService Toast
+@inject AgentTunnelRegistry Tunnels
+
+<PageTitle>Нода</PageTitle>
+@if (Node is not null)
+{
+    <PageHeader Title="@Node.Name" Subtitle="@Node.Address">
+        <Actions><a class="btn" href="nodes">← Ноды</a><button class="btn btn-primary" @onclick="Apply">Применить конфиг</button></Actions>
+    </PageHeader>
+    <div class="stat-grid">
+        <StatCard Label="Состояние" Value="@(Tunnels.IsConnected(Node.Id) ? "Подключена" : "Не подключена")" Hint="@LastSeen" />
+        <StatCard Label="CPU" Value="@($"{Node.CpuPercent:0}%")" Hint="@($"Xray: {Node.XrayVersion ?? "—"}")" />
+        <StatCard Label="Память" Value="@($"{Node.MemoryUsedPercent:0}%")" Hint="@($"Последнее применение: {Applied}")" />
+    </div>
+    <div class="dashboard-grid">
+        <section class="card">
+            <div class="card-h"><h2>Ключи Reality</h2></div>
+            <CopyField Label="Публичный ключ" Value="@Node.RealityPublicKey" />
+            <p class="muted">Приватный ключ не отображается.</p>
+        </section>
+        <section class="card">
+            <div class="card-h"><h2>Агент</h2></div>
+            <p class="muted">Агент подключается к панели по исходящему защищённому каналу.</p>
+        </section>
+        <section class="card chart-card">
+            <div class="card-h"><h2>Трафик за 7 дней</h2></div>
+            <svg class="traffic-chart" viewBox="0 0 700 180" role="img" aria-label="Трафик ноды за 7 дней">
+                @foreach (var item in Traffic.Select((value, index) => new { value, index }))
+                {
+                    <rect x="@(item.index * 90 + 20)" y="@(160 - Height(item.value))" width="42" height="@Height(item.value)" class="traffic-up" />
+                }
+            </svg>
+        </section>
+        <section class="card">
+            <div class="card-h"><h2>Действия</h2></div>
+            <button class="btn" @onclick="Apply">Применить конфиг</button>
+            <a class="btn" href="nodes">Обновить Xray и geo — в списке нод</a>
+        </section>
+    </div>
+}
+else
+{
+    <p>Нода не найдена.</p>
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private Node? Node;
+    private List<NodeTrafficDaily> Traffic = [];
+    private string LastSeen => Node?.LastSeenAt?.ToLocalTime().ToString("dd.MM HH:mm") ?? "нет данных";
+    private string Applied => Node?.LastAppliedAt?.ToLocalTime().ToString("dd.MM HH:mm") ?? "нет данных";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Node = await Nodes.Get(Id);
+        Traffic = await Db.NodeTrafficDaily.Where(item => item.NodeId == Id)
+            .OrderByDescending(item => item.Date).Take(7).OrderBy(item => item.Date).ToListAsync();
+    }
+
+    private int Height(NodeTrafficDaily item)
+    {
+        var maximum = Traffic.Select(value => value.UpBytes + value.DownBytes).DefaultIfEmpty(1).Max();
+        return (int)Math.Max(4, (item.UpBytes + item.DownBytes) * 140 / Math.Max(maximum, 1));
+    }
+
+    private async Task Apply()
+    {
+        await Sync.SyncNode(Id, true);
+        Toast.Success("Конфигурация применена");
+    }
+
+}

@@ -1,0 +1,1075 @@
+@page "/nodes"
+@rendermode InteractiveServer
+@implements IDisposable
+@using FrogPlug.Server.Components.Shared
+@using FrogPlug.Server.Services
+@using FrogPlug.Core
+@inject NodeService Service
+@inject NodeSyncService Sync
+@inject IAgentClient Agent
+@inject AgentTunnelRegistry Tunnels
+@inject XrayReleaseService Releases
+@inject XrayCoreStore Cores
+@inject SettingsService Settings
+@inject ToastService Toast
+@inject AppDbContext Db
+@inject IServiceScopeFactory ScopeFactory
+
+<PageTitle>Ноды</PageTitle>
+
+<div class="page-heading">
+    <h1>Ноды</h1>
+    <button class="primary-button" type="button" @onclick="OpenCreate">Добавить ноду</button>
+</div>
+
+<section class="panel table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Нода</th>
+                <th>Роли</th>
+                <th>Протоколы</th>
+                <th>Трафик за 24 ч</th>
+                <th>Онлайн</th>
+                <th>Xray</th>
+                <th>CPU</th>
+                <th>Статус</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var node in Items)
+            {
+                <tr>
+                    <td>
+                        <a class="node-link" href="nodes/@node.Id">
+                            <CountryBadge Country="@node.Country" />
+                            @node.Name
+                        </a>
+                        <small>@node.Address</small>
+                    </td>
+                    <td>
+                        <div class="chips">
+                            @foreach (var role in RoleBadges(node.Role))
+                            {
+                                <span class="chip @role.Class">@role.Label</span>
+                            }
+                        </div>
+                    </td>
+                    <td>
+                        <div class="chips">
+                            @if (node.RealityEnabled)
+                            {
+                                <span class="chip p-reality">Reality</span>
+                            }
+                            @if (node.XhttpEnabled)
+                            {
+                                <span class="chip p-xhttp">XHTTP</span>
+                            }
+                            @if (node.MtprotoEnabled)
+                            {
+                                <span class="chip p-mtp">MTProto</span>
+                            }
+                        </div>
+                    </td>
+                    <td>@Format.Bytes(Traffic24Hours(node))</td>
+                    <td>@(node.IsOnline ? "Да" : "Нет")</td>
+                    <td>@(node.XrayVersion ?? "вЂ”")</td>
+                    <td><Meter Value="@(node.IsOnline ? (int)node.CpuPercent : 0)" Label="Загрузка CPU" /></td>
+                    <td><span class="status-badge @StateClass(node)" title="@LastSeenTitle(node)">@StateLabel(node)</span></td>
+                    <td>
+                        <div class="action-buttons">
+                            <button class="small-button" type="button" @onclick="(() => OpenEdit(node))">
+                                Изменить
+                            </button>
+                            <a class="small-button" href="nodes/@node.Id">Детали</a>
+                            <button class="small-button" type="button" @onclick="(() => ApplyConfig(node))">
+                                Применить конфиг
+                            </button>
+                            <button class="small-button" type="button" @onclick="(() => OpenXrayUpdate(node))">
+                                Обновить Xray
+                            </button>
+                            <button class="small-button" type="button" @onclick="(() => UpdateGeo(node))">
+                                Обновить geo
+                            </button>
+                            <button class="small-button" type="button" @onclick="(() => OpenConfig(node))">
+                                Конфиг Xray
+                            </button>
+                            <button class="small-button danger-button" type="button" @onclick="(() => AskDelete(node))">
+                                Удалить
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (Items.Count == 0)
+    {
+        <p class="empty-state">Ноды не добавлены.</p>
+    }
+</section>
+
+<Modal Title="@(EditingId is null ? "Новая нода" : "Изменить ноду")" Visible="EditVisible" OnClose="CloseEdit">
+    <Body>
+        <EditForm Model="Form" OnValidSubmit="Save">
+            <DataAnnotationsValidator />
+            <section class="node-form-section">
+                <h3>Основное</h3>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="node-name">Имя</label>
+                        <InputText id="node-name" class="form-control" @bind-Value="Form.Name" />
+                    </div>
+                    <div class="form-field">
+                        <label for="node-address">Адрес</label>
+                        <InputText id="node-address" class="form-control" @bind-Value="Form.Address" />
+                    </div>
+                    <div class="form-field">
+                        <label for="node-country">Страна (2 буквы)</label>
+                        <InputText id="node-country" class="form-control" @bind-Value="Form.Country" />
+                    </div>
+                    <div class="form-field">
+                        <label for="node-notes">Заметка</label>
+                        <InputTextArea id="node-notes" class="form-control" @bind-Value="Form.Notes" />
+                    </div>
+                </div>
+                <div class="node-roles">
+                    <strong>Роли</strong>
+                    <label class="custom-check-field" for="node-entry">
+                        <input id="node-entry" class="custom-checkbox" type="checkbox" @bind="Form.Entry" /> Вход
+                    </label>
+                    <label class="custom-check-field" for="node-exit">
+                        <input id="node-exit" class="custom-checkbox" type="checkbox" @bind="Form.Exit" /> Выход
+                    </label>
+                    <label class="custom-check-field" for="node-ru-exit">
+                        <input id="node-ru-exit" class="custom-checkbox" type="checkbox" @bind="Form.RuExit" /> RU-выход
+                    </label>
+                    <label class="custom-check-field" for="node-google-exit">
+                        <input id="node-google-exit" class="custom-checkbox" type="checkbox" @bind="Form.GoogleExit" />
+                        Google-выход
+                    </label>
+                    <label class="custom-check-field" for="node-whitelist-entry">
+                        <input id="node-whitelist-entry" class="custom-checkbox" type="checkbox" @bind="Form.WhitelistEntry" />
+                        Вход для белых списков
+                    </label>
+                    @if (Form.WhitelistEntry)
+                    {
+                        <p class="muted">Сервер в российской сети из белого списка; трафик уходит каскадом на выход.</p>
+                        <div class="form-field">
+                            <label for="node-whitelist-exit">Выходной узел</label>
+                            <InputSelect id="node-whitelist-exit" class="form-control" @bind-Value="Form.WhitelistExitNodeId">
+                                <option value="">Выберите выход</option>
+                                @foreach (var node in Items.Where(node => node.Role.HasFlag(NodeRole.Exit)))
+                                {
+                                    <option value="@node.Id">@node.Name</option>
+                                }
+                            </InputSelect>
+                        </div>
+                    }
+                </div>
+            </section>
+            <section class="node-form-section">
+                <h3>Маскировка</h3>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="node-mask-mode">Режим</label>
+                        <InputSelect id="node-mask-mode" class="form-control" @bind-Value="Form.MaskMode">
+                            <option value="@MaskMode.OwnDomain">Свой домен</option>
+                            <option value="@MaskMode.ForeignSite">Чужой сайт</option>
+                        </InputSelect>
+                    </div>
+                    <div class="form-field">
+                        <label for="node-domain">Домен</label>
+                        <InputText id="node-domain" class="form-control" @bind-Value="Form.Domain" />
+                    </div>
+                    <div class="form-field">
+                        <label for="node-mtproto-host">Домен MTProto</label>
+                        <InputText id="node-mtproto-host" class="form-control" list="whitelist-sni-suggestions"
+                                   placeholder="cdn.example.com" @bind-Value="Form.MtprotoHost" />
+                        <small class="muted">
+                            Выбирайте нейтральное имя: cdn., static. или img. Оно попадает в журналы
+                            Certificate Transparency, поэтому не используйте tg., vpn. или proxy.
+                        </small>
+                        @if (Form.MaskMode == MaskMode.ForeignSite)
+                        {
+                            <button class="secondary-button" type="button" @onclick="ScanMask"
+                                    disabled="@(CurrentNode is null || ScanningMask)">
+                                @(ScanningMask ? "Подбор выполняется…" : "Подобрать FakeTLS-домен")
+                            </button>
+                        }
+                    </div>
+                    <div class="form-field">
+                        <label for="node-stub-template">Шаблон сайта</label>
+                        <InputSelect id="node-stub-template" class="form-control" @bind-Value="Form.StubTemplate">
+                            <option value="@StubSiteTemplates.PersonalBlog">Личный блог</option>
+                            <option value="@StubSiteTemplates.Photography">Фотопортфолио</option>
+                            <option value="@StubSiteTemplates.ItConsulting">ИТ-консалтинг</option>
+            <option value="custom">Свой сайт</option>
+                        </InputSelect>
+                    </div>
+                    <div class="form-field">
+                        <label for="node-stub-title">Заголовок сайта</label>
+                        <InputText id="node-stub-title" class="form-control" @bind-Value="Form.StubTitle" />
+                    </div>
+                </div>
+                @if (Form.MaskMode == MaskMode.OwnDomain && string.IsNullOrWhiteSpace(Form.Domain))
+                {
+                    <p class="form-error">Для своего домена укажите доменное имя.</p>
+                }
+                @if (Form.MaskMode == MaskMode.ForeignSite)
+                {
+                    <p class="muted">Без домена работают Reality, XHTTP, MTProto с FakeTLS и Hysteria2. Telegram Web требует свой домен.</p>
+                    @if (!string.IsNullOrWhiteSpace(MaskScanError))
+                    {
+                        <p class="form-error">@MaskScanError</p>
+                    }
+                    @if (MaskScanResult is not null)
+                    {
+                        <p class="muted">Проверено: @MaskScanResult.Scanned. Отклонено: @RejectedSummary(MaskScanResult.Rejected)</p>
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Сайт</th>
+                                        <th>IP</th>
+                                        <th>Задержка, мс</th>
+                                        <th>Действие</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var candidate in MaskScanResult.Candidates)
+                                    {
+                                        <tr>
+                                            <td>@candidate.Host</td>
+                                            <td>@candidate.Ip</td>
+                                            <td>@candidate.HandshakeMs</td>
+                                            <td>
+                                                <button class="small-button" type="button" @onclick="(() => SelectMask(candidate.Host))">Р’ Reality</button>
+                                                @if (Form.MaskMode == MaskMode.ForeignSite)
+                                                {
+                                                    <button class="small-button" type="button" @onclick="(() => SelectMtprotoMask(candidate.Host))">
+                                                        Р’ FakeTLS
+                                                    </button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                }
+            </section>
+            <details class="node-form-section">
+                <summary>Расширенные настройки</summary>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="node-reality-sni">@(Form.MaskMode == MaskMode.ForeignSite ? "Сайт для маскировки" : "Reality SNI")</label>
+                        @if (Form.MaskMode == MaskMode.OwnDomain)
+                        {
+                            <input id="node-reality-sni" class="form-control" readonly value="@Form.Domain" />
+                        }
+                        else
+                        {
+                            <InputText id="node-reality-sni" class="form-control" list="whitelist-sni-suggestions"
+                                       @bind-Value="Form.RealitySni" />
+                        }
+                        @if (Form.MaskMode == MaskMode.ForeignSite && Form.WhitelistEntry)
+                        {
+                            <datalist id="whitelist-sni-suggestions">
+                                @foreach (var suggestion in WhitelistSniSuggestionItems)
+                                {
+                                    <option value="@suggestion" />
+                                }
+                            </datalist>
+                            <small>Проверьте доступность домена в белом списке оператора.</small>
+                        }
+                        <small class="muted">
+                            @(Form.MaskMode == MaskMode.OwnDomain
+                                ? "В режиме своего домена SNI всегда равен домену — так работает самоподмена"
+                                : "Имя сайта для маскировки Reality.")
+                        </small>
+                    </div>
+                    @if (Form.MaskMode == MaskMode.ForeignSite)
+                    {
+                        <div class="form-field">
+                            <span class="form-label">Подбор сайта</span>
+                            <button class="secondary-button" type="button" @onclick="ScanMask" disabled="@(CurrentNode is null || ScanningMask)">
+                                @(ScanningMask ? "Подбор выполняется…" : "Подобрать сайт")
+                            </button>
+                        </div>
+                    }
+                    <div class="form-field">
+                        <label for="node-fingerprint">Отпечаток TLS</label>
+                        <InputSelect id="node-fingerprint" class="form-control" @bind-Value="Form.RealityFingerprint">
+                            @foreach (var value in new[] { "chrome", "firefox", "safari", "edge", "ios", "android", "random", "randomized" })
+                            {
+                                <option value="@value">@value</option>
+                            }
+                        </InputSelect>
+                        <small class="muted">Используется во всех ссылках Reality и XHTTP.</small>
+                    </div>
+                    <div class="form-field">
+                        <label for="node-short-id">Short ID Reality</label>
+                        <input id="node-short-id" class="form-control" readonly value="@(CurrentNode?.RealityShortId ?? "будет создан")" />
+                        @if (EditingId is not null)
+                        {
+                            <button class="secondary-button" type="button" @onclick="RegenerateShortId">Сгенерировать</button>
+                        }
+                        <small class="muted">Идентификатор клиента Reality.</small>
+                    </div>
+                    <div class="form-field">
+                        <label for="node-xhttp-path">Путь XHTTP</label>
+                        <InputText id="node-xhttp-path" class="form-control" @bind-Value="Form.XhttpPath" />
+                        <small class="muted">Путь внутри Reality для подключения XHTTP.</small>
+                    </div>
+                    <div class="form-field">
+                        <label for="node-xhttp-mode">Режим XHTTP</label>
+                        <InputSelect id="node-xhttp-mode" class="form-control" @bind-Value="Form.XhttpMode">
+                            <option value="auto">auto</option>
+                            <option value="packet-up">packet-up</option>
+                            <option value="stream-up">stream-up</option>
+                            <option value="stream-one">stream-one</option>
+                        </InputSelect>
+                        <small class="muted">Режим передачи данных XHTTP.</small>
+                    </div>
+                    <div class="form-field">
+                        <label for="node-hysteria-port">Порт Hysteria2</label>
+                        <InputNumber id="node-hysteria-port" class="form-control" @bind-Value="Form.HysteriaPort" />
+                        <small class="muted">UDP-порт Hysteria2, который нужно открыть в firewall.</small>
+                    </div>
+                    <div class="form-field">
+                        <label class="custom-check-field" for="node-hysteria-obfs">
+                            <input id="node-hysteria-obfs" class="custom-checkbox" type="checkbox" @bind="Form.HysteriaObfsEnabled" />
+                            Маскировка salamander
+                        </label>
+                        <small class="muted">При отключении Hysteria2 использует файловую masquerade.</small>
+                    </div>
+                </div>
+            </details>
+            <section class="node-form-section @(Form.RealityEnabled ? string.Empty : "protocol-section-disabled")">
+                <div class="section-heading">
+                    <h3>Reality</h3>
+                    <Toggle Value="@Form.RealityEnabled" ValueChanged="@(value => Form.RealityEnabled = value)">
+                        Включён
+                    </Toggle>
+                </div>
+                <div class="form-grid">
+                    <p class="muted">Публичный порт Reality: 443.</p>
+                </div>
+                @if (EditingId is not null && CurrentNode is not null)
+                {
+                    <CopyField Label="Публичный ключ" Value="@CurrentNode.RealityPublicKey" />
+                }
+            </section>
+            <section class="node-form-section @(Form.XhttpEnabled ? string.Empty : "protocol-section-disabled")">
+                <div class="section-heading">
+                    <h3>XHTTP</h3>
+                    <Toggle Value="@Form.XhttpEnabled" ValueChanged="@(value => Form.XhttpEnabled = value)">
+                        Включён
+                    </Toggle>
+                </div>
+            </section>
+            <section class="node-form-section">
+                <div class="section-heading">
+                    <h3>MTProto</h3>
+                    <Toggle Value="@Form.MtprotoEnabled" ValueChanged="@(value => Form.MtprotoEnabled = value)">
+                        Включён
+                    </Toggle>
+                </div>
+                @if (Form.MtprotoEnabled && !HasMtprotoRouteHost)
+                {
+                    <p class="form-error">
+                        MTProto не заработает, пока не задан отдельный домен MTProto
+                        (в режиме своего домена — поддомен с A-записью на этот сервер).
+                    </p>
+                }
+                <p class="muted">Порты, секрет и ссылки настраиваются на <a href="mtproto">странице MTProto</a>.</p>
+            </section>
+            <section class="node-form-section">
+                <div class="section-heading">
+                    <h3>Telegram Web</h3>
+                    <Toggle Value="@Form.TgWebEnabled" ValueChanged="@(value => Form.TgWebEnabled = value)" Disabled="@(Form.MaskMode == MaskMode.ForeignSite)">
+                        Включён
+                    </Toggle>
+                </div>
+                <p class="muted">
+                    WEB-прокси Telegram доступен только в режиме «Свой домен» и работает
+                    лишь в экспериментальных сборках Telegram Desktop, в обычных приложениях Telegram — нет.
+                </p>
+            </section>
+            <section class="node-form-section">
+                <div class="section-heading">
+                    <h3>Hysteria2</h3>
+                    <Toggle Value="@Form.HysteriaEnabled" ValueChanged="@(value => Form.HysteriaEnabled = value)">
+                        Включён
+                    </Toggle>
+                </div>
+                <p class="muted">Откройте UDP-порт @Form.HysteriaPort в firewall хоста.</p>
+            </section>
+            @if (EditingId is not null && CurrentNode is not null)
+            {
+                <CopyField Label="Токен агента" Value="@CurrentNode.AgentToken" />
+                <button class="secondary-button" type="button" @onclick="RegenerateAgentToken">
+                    Перевыпустить токен
+                </button>
+            }
+            @if (!string.IsNullOrWhiteSpace(Error))
+            {
+                <div class="form-error">@Error</div>
+            }
+            <div class="modal-footer">
+                <button class="secondary-button" type="button" @onclick="CloseEdit">Отмена</button>
+                <button class="primary-button" type="submit">Сохранить</button>
+            </div>
+        </EditForm>
+    </Body>
+</Modal>
+
+<Modal Title="Обновить Xray" Visible="XrayUpdateVisible" OnClose="CloseXrayUpdate">
+    <Body>
+        @if (XrayNode is not null)
+        {
+            <p>Текущая версия: @(XrayNode.XrayVersion ?? "не определена")</p>
+            <div class="form-field">
+                <label for="xray-version">Версия</label>
+                <select id="xray-version" class="form-control" @bind="SelectedXrayVersion">
+                    @foreach (var release in XrayReleases)
+                    {
+                        <option value="@release.TagName">
+                            @release.TagName@(CachedXrayVersions.Contains(release.TagName) ? " (в панели)" : string.Empty)
+                        </option>
+                    }
+                </select>
+            </div>
+        }
+        @if (!string.IsNullOrWhiteSpace(XrayError))
+        {
+            <div class="form-error">@XrayError</div>
+        }
+    </Body>
+    <Footer>
+        <button class="secondary-button" type="button" @onclick="CloseXrayUpdate">Отмена</button>
+        <button class="primary-button" type="button" @onclick="UpdateXray">Обновить</button>
+    </Footer>
+</Modal>
+
+<Modal Title="Конфиг Xray" Visible="ConfigVisible" OnClose="CloseConfig">
+    <Body>
+        <div class="form-field">
+            <label for="xray-config">Конфигурация Xray</label>
+            <textarea id="xray-config" class="form-control" rows="16" readonly>@ConfigText</textarea>
+        </div>
+    </Body>
+    <Footer>
+        <button class="secondary-button" type="button" @onclick="CloseConfig">Закрыть</button>
+    </Footer>
+</Modal>
+
+<Modal Title="Установка агента" Visible="InstallVisible" OnClose="CloseInstall">
+    <Body>
+        <p>Выполните команду на новой ноде.</p>
+        <CopyField Label="Команда установки" Value="@InstallCommand" />
+    </Body>
+    <Footer>
+        <button class="primary-button" type="button" @onclick="CloseInstall">Готово</button>
+    </Footer>
+</Modal>
+
+<ConfirmDialog Visible="ConfirmVisible" Text="@ConfirmText" OnCancel="CancelConfirm" OnConfirm="RunConfirm" />
+
+@code {
+    private readonly CancellationTokenSource refreshCancellation = new();
+    private List<Node> Items = [];
+    private Dictionary<int, long> Traffic24HoursByNode = [];
+    private bool EditVisible;
+    private bool XrayUpdateVisible;
+    private bool ConfigVisible;
+    private bool InstallVisible;
+    private bool ConfirmVisible;
+    private string ConfirmText = string.Empty;
+    private int? EditingId;
+    private Node? CurrentNode;
+    private Node? XrayNode;
+    private Node? InstallNode;
+    private NodeForm Form { get; set; } = new();
+    private Node? PendingNode;
+    private Func<Node, Task>? PendingAction;
+    private string? Error;
+    private IReadOnlyList<XrayRelease> XrayReleases = [];
+    private HashSet<string> CachedXrayVersions = [];
+    private string? SelectedXrayVersion;
+    private string? XrayError;
+    private string ConfigText = string.Empty;
+    private string? PublicBaseUrl;
+    private bool ScanningMask;
+    private string? MaskScanError;
+    private SniScanResponse? MaskScanResult;
+    private IReadOnlyList<string> WhitelistSniSuggestionItems = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        WhitelistSniSuggestionItems = WhitelistSniSuggestions.Parse(await Settings.GetWhitelistSniSuggestions());
+        _ = RefreshLoop();
+    }
+
+    private async Task Load()
+    {
+        // Отдельный scope на каждую загрузку: DbContext страницы кеширует сущности и не увидел бы
+        // изменения фонового опроса нод, а таймер не должен пересекаться с действиями пользователя.
+        using var scope = ScopeFactory.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<NodeService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Items = await service.List();
+        var today = DateTime.UtcNow.Date;
+        Traffic24HoursByNode = await db.NodeTrafficDaily
+            .Where(item => item.Date >= today.AddDays(-1))
+            .GroupBy(item => item.NodeId)
+            .ToDictionaryAsync(group => group.Key, group => group.Sum(item => item.UpBytes + item.DownBytes));
+    }
+
+    private async Task RefreshLoop()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(refreshCancellation.Token))
+            {
+                await InvokeAsync(Load);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void OpenCreate()
+    {
+        EditingId = null;
+        CurrentNode = null;
+        Form = new NodeForm();
+        Error = null;
+        ResetMaskScan();
+        EditVisible = true;
+    }
+
+    private void OpenEdit(Node node)
+    {
+        EditingId = node.Id;
+        CurrentNode = node;
+        Form = NodeForm.From(node);
+        Error = null;
+        ResetMaskScan();
+        EditVisible = true;
+    }
+
+    private async Task ScanMask()
+    {
+        if (CurrentNode is null)
+        {
+            return;
+        }
+
+        ScanningMask = true;
+        MaskScanError = null;
+        MaskScanResult = null;
+        try
+        {
+            MaskScanResult = await Agent.ScanMask(CurrentNode);
+        }
+        catch (Exception exception)
+        {
+            MaskScanError = AgentMessage(exception);
+        }
+        finally
+        {
+            ScanningMask = false;
+        }
+    }
+
+    private void SelectMask(string host)
+    {
+        Form.RealitySni = host;
+    }
+
+    private void SelectMtprotoMask(string host)
+    {
+        if (!string.Equals(host, Form.RealitySni, StringComparison.OrdinalIgnoreCase))
+        {
+            Form.MtprotoHost = host;
+        }
+    }
+
+    private void ResetMaskScan()
+    {
+        ScanningMask = false;
+        MaskScanError = null;
+        MaskScanResult = null;
+    }
+
+    private static string RejectedSummary(IReadOnlyDictionary<string, int> rejected)
+    {
+        return rejected.Count == 0
+            ? "нет"
+            : string.Join(", ", rejected.OrderBy(item => item.Key).Select(item => $"{item.Key}: {item.Value}"));
+    }
+
+    private async Task Save()
+    {
+        try
+        {
+            var input = Form.ToInput();
+            Node node;
+            if (EditingId is null)
+            {
+                node = await Service.Create(input);
+                InstallNode = node;
+                PublicBaseUrl = await Settings.GetPublicBaseUrl();
+                InstallVisible = true;
+            }
+            else
+            {
+                node = await Service.Update(EditingId.Value, input);
+            }
+
+            if (node.MtprotoEnabled != Form.MtprotoEnabled)
+            {
+                if (Form.MtprotoEnabled)
+                {
+                    await Service.EnableMtproto(node.Id);
+                }
+                else
+                {
+                    await Service.DisableMtproto(node.Id);
+                }
+            }
+
+            EditVisible = false;
+            await Load();
+        }
+        catch (Exception exception) when (exception is ValidationException or KeyNotFoundException)
+        {
+            Error = exception.Message;
+        }
+    }
+
+    private async Task ApplyConfig(Node node)
+    {
+        await Sync.SyncNode(node.Id, true);
+        await Load();
+        var updated = Items.FirstOrDefault(item => item.Id == node.Id);
+        if (string.IsNullOrWhiteSpace(updated?.LastApplyError))
+        {
+            Toast.Success("Конфигурация применена");
+            return;
+        }
+
+        Toast.Error($"Не удалось применить конфигурацию: {updated.LastApplyError}");
+    }
+
+    private async Task OpenXrayUpdate(Node node)
+    {
+        XrayNode = node;
+        XrayError = null;
+        XrayUpdateVisible = true;
+        var cached = await Cores.ListAsync();
+        CachedXrayVersions = cached.Select(item => item.Version).ToHashSet(StringComparer.Ordinal);
+        try
+        {
+            var releases = await Releases.GetLatest();
+            XrayReleases = releases
+                .Concat(cached.Select(item => new XrayRelease(item.Version, false)))
+                .GroupBy(item => item.TagName, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .OrderByDescending(item => item.TagName, StringComparer.Ordinal)
+                .ToArray();
+            SelectedXrayVersion = XrayReleases.FirstOrDefault()?.TagName;
+        }
+        catch (Exception exception)
+        {
+            XrayReleases = cached.Select(item => new XrayRelease(item.Version, false)).ToArray();
+            SelectedXrayVersion = XrayReleases.FirstOrDefault()?.TagName;
+            if (XrayReleases.Count == 0)
+            {
+                XrayError = $"Не удалось получить список версий Xray: {exception.Message}";
+            }
+        }
+    }
+
+    private async Task UpdateXray()
+    {
+        if (XrayNode is null || string.IsNullOrWhiteSpace(SelectedXrayVersion))
+        {
+            XrayError = "Выберите версию Xray";
+            return;
+        }
+
+        try
+        {
+            AgentStatus? status = null;
+            try
+            {
+                status = await Agent.GetStatus(XrayNode);
+            }
+            catch (HttpRequestException)
+            {
+            }
+
+            var rid = status?.Architecture?.Contains("arm", StringComparison.OrdinalIgnoreCase) == true
+                ? "linux-arm64"
+                : "linux-x64";
+            if (status?.Architecture is null)
+            {
+                await Cores.EnsureAsync(SelectedXrayVersion, "linux-x64");
+                await Cores.EnsureAsync(SelectedXrayVersion, "linux-arm64");
+            }
+            else
+            {
+                await Cores.EnsureAsync(SelectedXrayVersion, rid);
+            }
+
+            var core = await Cores.GetAsync(SelectedXrayVersion, rid);
+            var baseUrl = await Settings.GetPublicBaseUrl();
+            if (core is null || string.IsNullOrWhiteSpace(baseUrl))
+            {
+                throw new InvalidOperationException("Не задан публичный адрес панели");
+            }
+
+            var downloadUrl = $"{baseUrl.TrimEnd('/')}/agent/xray/{SelectedXrayVersion}/{rid}";
+            var result = await Agent.UpdateXray(XrayNode, SelectedXrayVersion, downloadUrl, core.Sha256);
+            var version = result?.NewVersion ?? SelectedXrayVersion;
+            Toast.Success($"Xray обновлён до {version}");
+            XrayUpdateVisible = false;
+            await Load();
+        }
+        catch (Exception exception)
+        {
+            XrayError = AgentMessage(exception);
+        }
+    }
+
+    private async Task UpdateGeo(Node node)
+    {
+        try
+        {
+            await Agent.UpdateGeo(node);
+            Toast.Success("Базы geo обновлены");
+        }
+        catch (Exception exception)
+        {
+            Toast.Error(AgentMessage(exception));
+        }
+    }
+
+    private async Task OpenConfig(Node node)
+    {
+        try
+        {
+            ConfigText = await Sync.GetConfig(node.Id);
+            ConfigVisible = true;
+        }
+        catch (Exception exception)
+        {
+            Toast.Error($"Не удалось подготовить конфигурацию Xray: {exception.Message}");
+        }
+    }
+
+    private void AskDelete(Node node)
+    {
+        PendingNode = node;
+        PendingAction = Delete;
+        ConfirmText = "Удалить ноду? Правила, направленные на неё, будут удалены.";
+        ConfirmVisible = true;
+    }
+
+    private async Task RunConfirm()
+    {
+        ConfirmVisible = false;
+        if (PendingNode is not null && PendingAction is not null)
+        {
+            await PendingAction(PendingNode);
+        }
+
+        PendingNode = null;
+        PendingAction = null;
+    }
+
+    private void CancelConfirm()
+    {
+        ConfirmVisible = false;
+        PendingNode = null;
+        PendingAction = null;
+    }
+
+    private async Task Delete(Node node)
+    {
+        await Service.Delete(node.Id);
+        await Load();
+    }
+
+    private async Task RegenerateAgentToken()
+    {
+        if (EditingId is null)
+        {
+            return;
+        }
+
+        await Service.RegenerateAgentToken(EditingId.Value);
+        CurrentNode = await Service.Get(EditingId.Value);
+    }
+
+    private async Task RegenerateShortId()
+    {
+        if (EditingId is null)
+        {
+            return;
+        }
+
+        await Service.RegenerateShortId(EditingId.Value);
+        CurrentNode = await Service.Get(EditingId.Value);
+    }
+
+    private void CloseEdit()
+    {
+        EditVisible = false;
+    }
+
+    private void CloseXrayUpdate()
+    {
+        XrayUpdateVisible = false;
+    }
+
+    private void CloseConfig()
+    {
+        ConfigVisible = false;
+    }
+
+    private void CloseInstall()
+    {
+        InstallVisible = false;
+    }
+
+    private string InstallCommand => string.IsNullOrWhiteSpace(PublicBaseUrl) || InstallNode is null
+        ? string.Empty
+        : $"bash install.sh --images images-VERSION.tar --panel-url {PublicBaseUrl} --token {InstallNode.AgentToken}";
+
+    private static string AgentMessage(Exception exception)
+    {
+        return $"Ошибка связи с агентом: {exception.Message}";
+    }
+
+    private string StateLabel(Node node)
+    {
+        if (Tunnels.IsConnected(node.Id))
+        {
+            return "Подключена";
+        }
+
+        return "Не подключена";
+    }
+
+    private string StateClass(Node node)
+    {
+        if (Tunnels.IsConnected(node.Id))
+        {
+            return "status-active";
+        }
+
+        return "status-expired";
+    }
+
+    private string? LastSeenTitle(Node node)
+    {
+        return LocalTime(Tunnels.LastConnectedAt(node.Id) ?? node.LastSeenAt);
+    }
+
+    private static string LocalTime(DateTime? value)
+    {
+        if (value is null)
+        {
+            return "вЂ”";
+        }
+
+        return DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+            .ToLocalTime()
+            .ToString("dd.MM.yyyy HH:mm");
+    }
+
+    private static string Metric(Node node, double value)
+    {
+        return node.IsOnline ? $"{value:0.##} %" : "вЂ”";
+    }
+
+    private long Traffic24Hours(Node node)
+    {
+        return Traffic24HoursByNode.GetValueOrDefault(node.Id);
+    }
+
+    private static IEnumerable<(string Label, string Class)> RoleBadges(NodeRole role)
+    {
+        if (role.HasFlag(NodeRole.Entry))
+        {
+            yield return ("Вход", "r-in");
+        }
+
+        if (role.HasFlag(NodeRole.Exit))
+        {
+            yield return ("Выход", "r-out");
+        }
+
+        if (role.HasFlag(NodeRole.RuExit))
+        {
+            yield return ("RU-выход", "r-ru");
+        }
+
+        if (role.HasFlag(NodeRole.GoogleExit))
+        {
+            yield return ("Google-выход", "r-g");
+        }
+
+        if (role.HasFlag(NodeRole.WhitelistEntry))
+        {
+            yield return ("Вход для белых списков", "r-in");
+        }
+    }
+
+    private static string FormatFingerprint(string fingerprint)
+    {
+        return string.Join(" ", Enumerable.Range(0, fingerprint.Length / 4)
+            .Select(index => fingerprint.Substring(index * 4, 4)));
+    }
+
+    private static string Roles(NodeRole role)
+    {
+        return string.Join(", ", Enum.GetValues<NodeRole>()
+            .Where(item => role.HasFlag(item))
+            .Select(item => item switch
+            {
+                NodeRole.Entry => "Вход",
+                NodeRole.Exit => "Выход",
+                NodeRole.RuExit => "RU-выход",
+                NodeRole.GoogleExit => "Google-выход",
+                NodeRole.WhitelistEntry => "Вход для белых списков",
+                _ => string.Empty
+            }));
+    }
+
+    public void Dispose()
+    {
+        refreshCancellation.Cancel();
+        refreshCancellation.Dispose();
+    }
+
+    private sealed class NodeForm
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Address { get; set; } = string.Empty;
+        public string Country { get; set; } = "RU";
+        public string? Domain { get; set; }
+        public bool RealityEnabled { get; set; } = true;
+        public MaskMode MaskMode { get; set; } = MaskMode.OwnDomain;
+        public string? RealitySni { get; set; }
+        public string RealityFingerprint { get; set; } = "chrome";
+        public string XhttpMode { get; set; } = "auto";
+        public bool HysteriaObfsEnabled { get; set; } = true;
+        public string? MtprotoHost { get; set; }
+        public string StubTemplate { get; set; } = StubSiteTemplates.PersonalBlog;
+        public string? StubTitle { get; set; }
+        public string XhttpPath { get; set; } = string.Empty;
+        public bool XhttpEnabled { get; set; } = true;
+        public bool MtprotoEnabled { get; set; }
+        public bool TgWebEnabled { get; set; }
+        public bool HysteriaEnabled { get; set; }
+        public int HysteriaPort { get; set; } = NodePorts.Hysteria;
+        public string? Notes { get; set; }
+        public bool Entry { get; set; }
+        public bool Exit { get; set; }
+        public bool RuExit { get; set; }
+        public bool GoogleExit { get; set; }
+        public bool WhitelistEntry { get; set; }
+        public int? WhitelistExitNodeId { get; set; }
+
+        public NodeInput ToInput()
+        {
+            var role = (Entry ? NodeRole.Entry : 0)
+                | (Exit ? NodeRole.Exit : 0)
+                | (RuExit ? NodeRole.RuExit : 0)
+                | (GoogleExit ? NodeRole.GoogleExit : 0);
+            if (WhitelistEntry)
+            {
+                role |= NodeRole.Entry | NodeRole.WhitelistEntry;
+            }
+            return new NodeInput(
+                Name,
+                Address,
+                Country,
+                role,
+                Domain,
+                true,
+                NodePorts.Reality,
+                NodePorts.Xhttp,
+                null,
+                null,
+                null,
+                Notes,
+                string.Empty,
+                string.Empty,
+                RealityEnabled,
+                XhttpEnabled,
+                MaskMode,
+                RealitySni,
+                MtprotoHost,
+                StubTemplate,
+                StubTitle,
+                WhitelistExitNodeId,
+                TgWebEnabled,
+                HysteriaEnabled,
+                HysteriaPort,
+                RealityFingerprint,
+                XhttpMode,
+                HysteriaObfsEnabled,
+                XhttpPath);
+        }
+
+        public static NodeForm From(Node node)
+        {
+            return new NodeForm
+            {
+                Name = node.Name,
+                Address = node.Address,
+                Country = node.Country,
+                Domain = node.Domain,
+                RealityEnabled = node.RealityEnabled,
+                MaskMode = node.MaskMode,
+                RealitySni = node.RealitySni,
+                RealityFingerprint = node.RealityFingerprint,
+                XhttpMode = node.XhttpMode,
+                HysteriaObfsEnabled = node.HysteriaObfsEnabled,
+                MtprotoHost = node.MtprotoHost,
+                StubTemplate = node.StubTemplate,
+                StubTitle = node.StubTitle,
+                XhttpPath = node.XhttpPath,
+                XhttpEnabled = node.XhttpEnabled,
+                MtprotoEnabled = node.MtprotoEnabled,
+                TgWebEnabled = node.TgWebEnabled,
+                HysteriaEnabled = node.HysteriaEnabled,
+                HysteriaPort = node.HysteriaPort,
+                Notes = node.Notes,
+                Entry = node.Role.HasFlag(NodeRole.Entry),
+                Exit = node.Role.HasFlag(NodeRole.Exit),
+                RuExit = node.Role.HasFlag(NodeRole.RuExit),
+                GoogleExit = node.Role.HasFlag(NodeRole.GoogleExit),
+                WhitelistEntry = node.Role.HasFlag(NodeRole.WhitelistEntry),
+                WhitelistExitNodeId = node.WhitelistExitNodeId
+            };
+        }
+    }
+
+    // Тот же критерий, что у Node.MtprotoRouteHost: свой хост, не совпадающий с доменом ноды.
+    private bool HasMtprotoRouteHost =>
+        !string.IsNullOrWhiteSpace(Form.MtprotoHost) &&
+        !string.Equals(Form.MtprotoHost.Trim(), Form.Domain?.Trim(), StringComparison.OrdinalIgnoreCase);
+}
