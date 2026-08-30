@@ -1,0 +1,272 @@
+.personal-shell {
+    min-height: 100vh;
+    padding: 20px 16px 28px;
+    color: var(--text);
+    background:
+        linear-gradient(180deg, rgba(14, 12, 18, .2), rgba(14, 12, 18, .9) 340px),
+        url("img/bg-panel.webp") top center / auto 560px no-repeat,
+        var(--bg);
+}
+
+.personal-card {
+    display: grid;
+    width: min(100%, 480px);
+    gap: 14px;
+    margin: 0 auto;
+}
+
+.personal-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 2px 10px;
+}
+
+.personal-head div,
+.personal-head small,
+.personal-steps span {
+    display: grid;
+    gap: 2px;
+}
+
+.personal-head strong {
+    font-size: 16px;
+}
+
+.personal-section,
+.personal-actions {
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    backdrop-filter: blur(14px);
+}
+
+.personal-section h2 {
+    margin: 0 0 12px;
+    font-size: 16px;
+}
+
+.personal-section p {
+    margin: 8px 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.personal-section a {
+    color: var(--accent-ink);
+}
+
+.personal-status-card {
+    display: grid;
+    gap: 18px;
+}
+
+.personal-status {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.personal-status.active {
+    color: var(--ok);
+    background: rgba(76, 195, 138, .13);
+}
+
+.personal-status.inactive {
+    color: var(--bad);
+    background: rgba(244, 119, 107, .13);
+}
+
+.personal-status-card h1 {
+    margin: 10px 0 0;
+    font-size: 24px;
+}
+
+.personal-traffic {
+    display: grid;
+    gap: 10px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+
+.personal-traffic div {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.personal-traffic span,
+.personal-traffic small {
+    color: var(--faint);
+    font-size: 12px;
+}
+
+.personal-traffic strong {
+    font-size: 20px;
+}
+
+.personal-actions {
+    display: grid;
+    gap: 10px;
+}
+
+.personal-button {
+    display: inline-flex;
+    min-height: 46px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    border-radius: 10px;
+    color: #fff;
+    background: var(--accent);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.personal-url {
+    display: flex;
+    gap: 6px;
+}
+
+.personal-url input {
+    min-width: 0;
+    flex: 1;
+    padding: 0 10px;
+    border: 1px solid var(--line-2);
+    border-radius: 9px;
+    color: var(--muted);
+    background: rgba(10, 8, 12, .55);
+    font: 12px var(--mono);
+}
+
+.personal-url button {
+    min-height: 40px;
+    padding: 0 11px;
+    border: 1px solid var(--line-2);
+    border-radius: 9px;
+    color: var(--text);
+    background: rgba(255, 255, 255, .05);
+}
+
+.personal-qr-section {
+    text-align: center;
+}
+
+.personal-qr-section h2 {
+    text-align: left;
+}
+
+.personal-qr {
+    width: min(200px, 100%);
+    margin: 12px auto;
+    padding: 10px;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.personal-qr svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.personal-steps {
+    display: grid;
+    gap: 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.personal-steps li {
+    display: flex;
+    gap: 12px;
+}
+
+.personal-steps b {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: 50%;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    font-size: 13px;
+    place-items: center;
+}
+
+.personal-steps small {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+@media (min-width: 540px) {
+    .personal-status-card {
+        grid-template-columns: 1fr 1fr;
+        align-items: end;
+    }
+
+    .personal-traffic {
+        padding-top: 0;
+        padding-left: 18px;
+        border-top: 0;
+        border-left: 1px solid var(--line);
+    }
+}
+
+/* Декоративные картинки по бокам от карточки; на узких экранах прячем, чтобы не мешали ссылкам. */
+.personal-art {
+    position: fixed;
+    top: 50%;
+    z-index: 0;
+    width: clamp(180px, calc((100vw - 560px) / 2 - 48px), 340px);
+    height: auto;
+    transform: translateY(-50%);
+    pointer-events: none;
+    user-select: none;
+    animation: personal-float 6s ease-in-out infinite;
+    will-change: transform;
+}
+
+.personal-art-left {
+    right: calc(50% + 240px + 32px);
+}
+
+/* Правая картинка в противофазе и чуть медленнее, чтобы движение не выглядело синхронным. */
+.personal-art-right {
+    left: calc(50% + 240px + 32px);
+    animation-duration: 7s;
+    animation-delay: -3.5s;
+}
+
+@keyframes personal-float {
+    0%, 100% {
+        transform: translateY(-50%) rotate(-1.5deg);
+    }
+
+    50% {
+        transform: translateY(calc(-50% - 18px)) rotate(1.5deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .personal-art {
+        animation: none;
+    }
+}
+
+.personal-card {
+    position: relative;
+    z-index: 1;
+}
+
+@media (max-width: 1000px) {
+    .personal-art {
+        display: none;
+    }
+}

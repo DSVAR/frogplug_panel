@@ -1,0 +1,214 @@
+@page "/u/{Token}"
+@layout EmptyLayout
+@attribute [AllowAnonymous]
+@using FrogPlug.Core
+@using FrogPlug.Server.Components.Shared
+@using FrogPlug.Server.Services
+@inject SubscriptionService Subscriptions
+@inject SettingsService Settings
+@inject OpenFluxService Whitelists
+@inject NodeService Nodes
+@inject NavigationManager Navigation
+@inject PublicLinkOptions PublicLinks
+
+<PageTitle>@Title</PageTitle>
+<img class="personal-art personal-art-left" src="img/personal-left.webp" alt="" aria-hidden="true" />
+<img class="personal-art personal-art-right" src="img/personal-right.webp" alt="" aria-hidden="true" />
+@if (User is null)
+{
+    <main class="personal-card">
+        <h1>Ссылка не найдена</h1>
+        <p>Проверьте адрес страницы.</p>
+    </main>
+}
+else
+{
+    <main class="personal-card">
+        <header class="personal-head">
+            <span class="ava"><Icon Name="overview" /></span>
+            <div>
+                <strong>@Title</strong>
+                <small>Ваша подписка</small>
+            </div>
+        </header>
+        <section class="personal-section personal-status-card">
+            <div>
+                <span class="personal-status @(User.IsActiveAt(DateTime.UtcNow) ? "active" : "inactive")">
+                    @(User.IsActiveAt(DateTime.UtcNow) ? "Активна" : "Неактивна")
+                </span>
+                <h1>@User.Name</h1>
+                <p>Действует до: @(User.ExpiresAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "бессрочно")</p>
+            </div>
+            <div class="personal-traffic">
+                <div>
+                    <span>Трафик</span>
+                    <strong>@Format.Bytes(UsedTraffic)</strong>
+                    <small>/ @TrafficLimit</small>
+                </div>
+                <Meter Value="@TrafficPercent" Label="Использование трафика" />
+            </div>
+        </section>
+        <section class="personal-actions">
+            <a class="personal-button" href="@HappUrl">Добавить в Happ</a>
+            <label for="subscription-url">Ссылка подписки</label>
+            <div class="personal-url">
+                <input id="subscription-url" readonly value="@SubscriptionUrl" />
+                <button type="button" data-copy-target="subscription-url">Копировать</button>
+            </div>
+        </section>
+        <section class="personal-section personal-qr-section">
+            <h2>QR-код для другого устройства</h2>
+            <div class="personal-qr">@((MarkupString)QrSvg.Generate(SubscriptionUrl))</div>
+            <p>Откройте Happ на телефоне → «+» → «Сканировать QR».</p>
+        </section>
+        @if (ProtocolLinks.Count > 0)
+        {
+            <section class="personal-section">
+                <h2>Отдельные ссылки</h2>
+                <p>Для приложений без подписки: скопируйте нужный протокол или отсканируйте его QR-код.</p>
+                @foreach (var entry in ProtocolLinks)
+                {
+                    <PersonalLinkRow Badge="@ProtocolBadge(entry.Protocol)"
+                                     Title="@entry.NodeName"
+                                     CountryCode="@entry.CountryCode"
+                                     Link="@entry.Link" />
+                }
+            </section>
+        }
+        <section class="personal-section">
+            <h2>Как подключиться</h2>
+            <ol class="personal-steps">
+                <li><b>1</b><span><strong>Установите Happ</strong><small>Выберите приложение для своего устройства.</small></span></li>
+                <li><b>2</b><span><strong>Добавьте подписку</strong><small>Нажмите кнопку выше или вставьте ссылку в Happ.</small></span></li>
+                <li><b>3</b><span><strong>Включите подключение</strong><small>Выберите сервер «Авто» и нажмите кнопку подключения.</small></span></li>
+            </ol>
+        </section>
+        <section class="personal-section">
+            <h2>Установка Happ</h2>
+            <p>Android: <a href="https://play.google.com/store/apps/details?id=com.happproxy">Google Play</a> ·
+                <a href="https://github.com/Happ-proxy/happ-android/releases">GitHub</a></p>
+            <p>iOS: <a href="https://apps.apple.com/app/happ-proxy/id6504287215">App Store</a></p>
+            <p>Windows/macOS: <a href="https://www.happ.su/">сайт Happ</a></p>
+        </section>
+        <section class="personal-section">
+            <h2>Короткая инструкция</h2>
+            <p>
+                Включите режим VPN (TUN), исключите банковские приложения
+                в раздельном туннелировании и выключите «Точное определение местоположения Google».
+            </p>
+        </section>
+        @if (User.AllowWhitelist)
+        {
+            <section class="personal-section">
+                <h2>Белые списки (OpenFlux)</h2>
+                <CopyField Label="Ключ подписки для приложения OpenFlux" Value="@SubscriptionUrl" />
+                <div class="personal-qr">@((MarkupString)QrSvg.Generate(SubscriptionUrl))</div>
+                @foreach (var link in WhitelistLinks)
+                {
+                    <PersonalLinkRow Badge="OpenFlux" Title="@link.Name" Link="@link.Link" />
+                }
+                <p>Установите приложение, добавьте ссылку или отсканируйте QR-код, затем подключитесь.</p>
+                <p><a href="https://github.com/OpenFluxTeam/OpenFluxAndroid">Android</a> ·
+                    <a href="https://github.com/OpenFluxTeam/OpenFluxDesktop">Windows/macOS/Linux</a> ·
+                    <a href="https://testflight.apple.com/join/BwnAcdus">iOS TestFlight</a></p>
+            </section>
+        }
+        @if (User.AllowMtproto && MtprotoNodes.Count > 0)
+        {
+            <section class="personal-section">
+                <h2>Telegram (MTProto)</h2>
+                @foreach (var node in MtprotoNodes)
+                {
+                    <a class="personal-button" href="@MtprotoLinks.Tg(node.Domain ?? node.Address, NodePorts.Public, node.MtprotoSecret!)">
+                        Подключить в Telegram — @node.Name
+                    </a>
+                    <PersonalLinkRow Badge="MTProto"
+                                     Title="@node.Name"
+                                     CountryCode="@node.Country"
+                    Link="@MtprotoLinks.Https(node.Domain ?? node.Address, NodePorts.Public, node.MtprotoSecret!)" />
+                }
+            </section>
+        }
+        @if (User.AllowTgWeb && TgWebNodes.Count > 0)
+        {
+            <section class="personal-section">
+                <h2>Telegram Web</h2>
+                @foreach (var node in TgWebNodes)
+                {
+                    <PersonalLinkRow Badge="Telegram Web" Title="@node.Name" CountryCode="@node.Country"
+                                     Link="@TgWebLinks.Https(node.Domain!, node.MtprotoSecret!)" />
+                }
+                <p>
+                    Работает только в клиентах Telegram с поддержкой WEB-прокси:
+                    сейчас это экспериментальные сборки Telegram Desktop.
+                    В обычных приложениях Telegram на телефонах не работает.
+                </p>
+            </section>
+        }
+    </main>
+}
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+    private ClientUser? User;
+    private string Title = "VPN";
+    private string SubscriptionUrl = string.Empty;
+    private List<WhitelistLink> WhitelistLinks = [];
+    private List<Node> MtprotoNodes = [];
+    private List<Node> TgWebNodes = [];
+    private IReadOnlyList<SubscriptionLinkEntry> ProtocolLinks = [];
+    private string HappUrl => $"happ://add/{Uri.EscapeDataString(SubscriptionUrl)}";
+    private long UsedTraffic => User?.UsedUploadBytes + User?.UsedDownloadBytes ?? 0;
+    private string TrafficLimit => User?.TrafficLimitBytes is { } limit ? Format.Bytes(limit) : "без лимита";
+    private int TrafficPercent => User?.TrafficLimitBytes is { } limit && limit > 0
+        ? (int)Math.Min(100, UsedTraffic * 100 / limit)
+        : 0;
+
+    private static string ProtocolBadge(SubscriptionLinkProtocol protocol)
+    {
+        return protocol switch
+        {
+            SubscriptionLinkProtocol.Reality => "Reality",
+            SubscriptionLinkProtocol.Hysteria => "Hysteria2",
+            _ => "XHTTP"
+        };
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await Subscriptions.Build(Token);
+        User = result.User;
+        Title = result.ProfileTitle;
+        var baseUrl = string.IsNullOrWhiteSpace(result.PublicBaseUrl) ? Navigation.BaseUri : result.PublicBaseUrl;
+        baseUrl = PublicLinks.GetSubscriptionBaseUrl(baseUrl);
+        SubscriptionUrl = $"{baseUrl.TrimEnd('/')}/sub/{Token}";
+        if (User is not null && User.IsActiveAt(DateTime.UtcNow))
+        {
+            ProtocolLinks = await Subscriptions.GetLinks(User);
+        }
+
+        if (User?.AllowWhitelist == true)
+        {
+            var channels = await Whitelists.ListEnabled();
+            WhitelistLinks = channels
+                .Select(channel => new WhitelistLink(channel.Name, OpenFluxShare.Encode(Whitelists.GetShareConfig(channel))))
+                .ToList();
+        }
+        if (User?.AllowMtproto == true)
+        {
+            MtprotoNodes = (await Nodes.List())
+                .Where(node => node.MtprotoEnabled && node.MtprotoSecret is not null &&
+                    node.MtprotoRouteHost is not null)
+                .ToList();
+        }
+        if (User?.AllowTgWeb == true)
+        {
+            TgWebNodes = (await Nodes.List())
+                .Where(node => node.TgWebEnabled && node.MaskMode == MaskMode.OwnDomain &&
+                    node.Domain is not null && node.MtprotoSecret is not null)
+                .ToList();
+        }
+    }
+
+    private sealed record WhitelistLink(string Name, string Link);
+}
