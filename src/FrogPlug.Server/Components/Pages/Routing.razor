@@ -1,0 +1,168 @@
+@page "/routing"
+@rendermode InteractiveServer
+@using FrogPlug.Server.Services
+@using FrogPlug.Server.Components.Shared
+@inject RoutingService Service
+@inject NodeService Nodes
+
+<PageTitle>Маршрутизация</PageTitle>
+<div class="page-heading">
+<div>
+<h1>Маршрутизация</h1>
+<p class="muted">Правила проверяются сверху вниз: срабатывает первое совпадение.</p>
+<p class="muted">Остальное направляется напрямую.</p>
+</div>
+<button class="primary-button" @onclick="OpenCreate">Добавить правило</button>
+</div>
+<section class="panel table-wrap">
+<table class="data-table">
+<thead>
+<tr>
+<th>№</th>
+<th>Тип</th>
+<th>Значение</th>
+<th>Куда</th>
+<th>Комментарий</th>
+<th>Вкл</th>
+<th>Порядок</th>
+<th>
+</th>
+</tr>
+</thead>
+<tbody>
+@foreach (var rule in Rules)
+{
+    <tr>
+<td>@rule.Order</td>
+<td>@TypeLabel(rule.MatchType)</td>
+<td>@rule.Value</td>
+<td>@TargetLabel(rule.Target)</td>
+<td>@rule.Comment</td>
+<td>
+<input type="checkbox" checked="@rule.IsEnabled" @onchange="async e => await Toggle(rule, (bool)e.Value!)" />
+</td>
+<td>
+<button class="small-button" disabled="@(rule.Order == 1)" @onclick="(() => MoveUp(rule))">↑</button>
+<button class="small-button" disabled="@(rule.Order == Rules.Count)" @onclick="(() => MoveDown(rule))">↓</button>
+</td>
+<td>
+<button class="small-button" @onclick="(() => OpenEdit(rule))">Изменить</button>
+<button class="small-button danger-button" @onclick="(() => Delete(rule))">Удалить</button>
+</td>
+</tr>
+}
+</tbody>
+</table>
+</section>
+<button class="secondary-button" @onclick="Seed">Восстановить правила по умолчанию</button>
+<Modal Title="@(EditingId is null ? "Новое правило" : "Изменить правило")" Visible="EditVisible" OnClose="CloseEdit">
+<Body>
+<EditForm Model="Form" OnValidSubmit="Save">
+<div class="form-grid">
+<div class="form-field">
+<label>Тип</label>
+<select class="form-control" @bind="Form.Type">
+<option value="Geosite">Geosite</option>
+<option value="Geoip">GeoIP</option>
+<option value="Domain">Домен</option>
+<option value="Full">Точный домен</option>
+<option value="Ip">IP</option>
+<option value="Port">Порт</option>
+</select>
+</div>
+<div class="form-field">
+<label>Значение</label>
+<InputText class="form-control" @bind-Value="Form.Value" />
+</div>
+<div class="form-field">
+<label>Куда</label>
+<select class="form-control" @bind="Form.Target">
+<option value="direct">Напрямую</option>
+<option value="block">Блокировать</option>
+<option value="role:RuExit">RU-выход</option>
+<option value="role:GoogleExit">Google-выход</option>
+@foreach (var node in NodeItems)
+{
+    <option value="node:@node.Id">Нода «@node.Name»</option>
+}
+</select>
+</div>
+<div class="form-field">
+<label>Комментарий</label>
+<InputText class="form-control" @bind-Value="Form.Comment" />
+</div>
+</div>
+<div class="modal-footer">
+<button class="secondary-button" type="button" @onclick="CloseEdit">Отмена</button>
+<button class="primary-button" type="submit">Сохранить</button>
+</div>
+</EditForm>
+</Body>
+</Modal>
+@code {
+    private List<RoutingRule> Rules = [];
+    private List<Node> NodeItems = [];
+    private bool EditVisible;
+    private int? EditingId;
+    private RuleForm Form = new();
+    protected override async Task OnInitializedAsync() { await Load();
+    NodeItems = await Nodes.List();
+    }
+    private async Task Load() => Rules = await Service.List();
+    private void OpenCreate() { EditingId = null;
+    Form = new();
+    EditVisible = true;
+    }
+    private void OpenEdit(RoutingRule rule) { EditingId = rule.Id;
+    Form = new() { Type = rule.MatchType.ToString(), Value = rule.Value, Target = rule.Target, Comment = rule.Comment };
+    EditVisible = true;
+    }
+    private async Task Save() { var input = new RoutingRuleInput(Enum.Parse<RoutingMatchType>(Form.Type), Form.Value, Form.Target, true, Form.Comment);
+    if (EditingId is null) { await Service.Add(input);
+    } else { await Service.Update(EditingId.Value, input);
+    } EditVisible = false;
+    await Load();
+    }
+    private async Task Toggle(RoutingRule rule, bool value) { await Service.SetEnabled(rule.Id, value);
+    await Load();
+    }
+    private async Task MoveUp(RoutingRule rule) { await Service.MoveUp(rule.Id);
+    await Load();
+    }
+    private async Task MoveDown(RoutingRule rule) { await Service.MoveDown(rule.Id);
+    await Load();
+    }
+    private async Task Delete(RoutingRule rule) { await Service.Delete(rule.Id);
+    await Load();
+    }
+    private async Task Seed() { foreach (var rule in Rules) { await Service.Delete(rule.Id);
+    } await Service.SeedDefaultsAsync();
+    await Load();
+    }
+    private void CloseEdit() => EditVisible = false;
+    private static string TypeLabel(RoutingMatchType type) => type switch
+    {
+        RoutingMatchType.Geoip => "GeoIP",
+        RoutingMatchType.Geosite => "Geosite",
+        RoutingMatchType.Domain => "Домен",
+        RoutingMatchType.Full => "Точный домен",
+        RoutingMatchType.Ip => "IP",
+        RoutingMatchType.Port => "Порт",
+        _ => type.ToString()
+    };
+    private string TargetLabel(string target) { if (target == "direct") return "Напрямую";
+    if (target == "block") return "Блокировать";
+    if (target == "role:RuExit") return "RU-выход";
+    if (target == "role:GoogleExit") return "Google-выход";
+    if (target.StartsWith("node:") && int.TryParse(target[5..], out var id)) return $"Нода «{NodeItems.FirstOrDefault(n => n.Id == id)?.Name ?? target}»";
+    return target;
+    }
+    private sealed class RuleForm { public string Type { get; set;
+    } = "Domain";
+    public string Value { get; set;
+    } = string.Empty;
+    public string Target { get; set;
+    } = "direct";
+    public string? Comment { get; set;
+    } }
+}
