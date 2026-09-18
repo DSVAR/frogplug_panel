@@ -1,0 +1,115 @@
+@page "/"
+@rendermode InteractiveServer
+@using FrogPlug.Server.Services
+@inject DashboardService Dashboard
+@inject ClientUserService Users
+@inject SyncQueue SyncQueue
+@inject ToastService Toast
+
+<PageTitle>Обзор</PageTitle>
+<PageHeader Title="Обзор" Subtitle="Состояние сервиса и узлов">
+    <Actions>
+        <span class="stamp">Обновлено в @Updated.ToLocalTime().ToString("HH:mm")</span>
+        <button class="btn btn-ghost" type="button" @onclick="Refresh"><Icon Name="refresh" /></button>
+        <button class="btn btn-primary" type="button" @onclick="ApplyAll">Применить конфиг на всех нодах</button>
+    </Actions>
+</PageHeader>
+
+@if (Data is not null)
+{
+    <div class="stat-grid">
+        <StatCard Icon="users" Label="Пользователи" Value="@Data.Users.Total.ToString()" Hint="@($"+{Data.Users.AddedLast24Hours} за 24 часа")" />
+        <StatCard Icon="nodes"
+                  Label="Ноды"
+                  Value="@($"{Data.Nodes.Online} / {Data.Nodes.Total}")"
+                  Hint="@($"{Data.Nodes.Warning} с предупреждением, {Data.Nodes.Offline} не в сети")" />
+        <StatCard Icon="overview" Label="Онлайн сейчас" Value="@Data.OnlineNow.ToString()" Hint="Активность за 5 минут" />
+        <StatCard Icon="chart"
+                  Label="Трафик за 24 ч"
+                  Value="@($"{Format.Bytes(Data.Traffic.UpBytes)} / {Format.Bytes(Data.Traffic.DownBytes)}")"
+                  Hint="входящий / исходящий" />
+    </div>
+    <div class="dashboard-grid">
+        <section class="card chart-card">
+            <div class="card-h"><h2>Трафик за 24 часа</h2><span class="legend">Входящий · Исходящий</span></div>
+            <TrafficChart Values="Data.Traffic.Points" />
+        </section>
+        <section class="card node-summary-card">
+            <div class="card-h"><h2>Ноды</h2></div>
+            <strong class="node-summary-total">@Data.Nodes.Total</strong>
+            <span class="node-summary-label">всего нод</span>
+            <div class="node-status-bar" aria-label="Состояние нод">
+                <span class="node-status-online" style="@StatusWidth(Data.Nodes.Online)"></span>
+                <span class="node-status-warning" style="@StatusWidth(Data.Nodes.Warning)"></span>
+                <span class="node-status-offline" style="@StatusWidth(Data.Nodes.Offline)"></span>
+            </div>
+            <div class="node-summary-legend">
+                <span><i class="legend-dot legend-online"></i>В сети <b>@Data.Nodes.Online</b></span>
+                <span><i class="legend-dot legend-warning"></i>С предупреждением <b>@Data.Nodes.Warning</b></span>
+                <span><i class="legend-dot legend-offline"></i>Не в сети <b>@Data.Nodes.Offline</b></span>
+            </div>
+        </section>
+        <section class="card">
+            <div class="card-h"><h2>Истекают за 7 дней</h2><a href="users?status=expiring">Все @Data.Expiring.Total →</a></div>
+            @foreach (var user in Data.Expiring.Items)
+            {
+                <div class="list-row">
+                    <span><b>@user.Name</b><small>@Format.RelativeDays(user.ExpiresAt, DateTime.UtcNow)</small></span>
+                    <button class="btn btn-sm" @onclick="(() => Extend(user.Name))">+30 дней</button>
+                </div>
+            }
+        </section>
+        <section class="card">
+            <div class="card-h"><h2>Загрузка CPU</h2></div>
+            @foreach (var node in Data.NodeCpu)
+            {
+                <div class="list-row"><span>@node.Name</span><Meter Value="@(node.IsOnline ? (int)node.CpuPercent : 0)" Label="CPU" /></div>
+            }
+        </section>
+        <section class="card">
+            <div class="card-h"><h2>Последние события</h2><a href="audit">Журнал →</a></div>
+            @foreach (var entry in Data.Audit)
+            {
+                <div class="list-row"><span><Icon Name="check" /> @entry.Label</span><small>@entry.At.ToLocalTime().ToString("dd.MM HH:mm")</small></div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private DashboardData? Data;
+    private DateTime Updated = DateTime.UtcNow;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Refresh();
+    }
+
+    private async Task Refresh()
+    {
+        Data = await Dashboard.Get();
+        Updated = DateTime.UtcNow;
+    }
+
+    private void ApplyAll()
+    {
+        SyncQueue.RequestAll();
+        Toast.Success("Синхронизация всех нод поставлена в очередь");
+    }
+
+    private async Task Extend(string name)
+    {
+        var user = (await Users.List(name)).FirstOrDefault(item => item.Name == name);
+        if (user is not null)
+        {
+            await Users.ExtendDays(user.Id, 30);
+            await Refresh();
+        }
+    }
+
+    private string StatusWidth(int count)
+    {
+        var total = Math.Max(Data?.Nodes.Total ?? 0, 1);
+        return FormattableString.Invariant($"width: {count * 100d / total:0.##}%");
+    }
+}
