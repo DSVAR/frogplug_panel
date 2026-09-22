@@ -1,0 +1,281 @@
+@page "/whitelist"
+@rendermode InteractiveServer
+@using FrogPlug.Core
+@using FrogPlug.Server.Components.Shared
+@using FrogPlug.Server.Data
+@using FrogPlug.Server.Services
+@inject OpenFluxService Service
+@inject NodeService Nodes
+@inject ToastService Toast
+
+<PageTitle>Белые списки</PageTitle>
+<div class="page-heading">
+    <h1>Белые списки</h1>
+    <button class="primary-button" type="button" @onclick="OpenCreate">Добавить канал</button>
+</div>
+<p>Ключ канала общий для всех, кто видит ссылку. При смене ключа все клиентские ссылки изменятся.</p>
+<section class="panel table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Канал</th>
+                <th>Нода</th>
+                <th>Перевозчики</th>
+                <th>Статус</th>
+                <th>Применено</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Items)
+            {
+                <tr>
+                    <td>@item.Name</td>
+                    <td>@item.Node?.Name</td>
+                    <td>@Carriers(item)</td>
+                    <td>@(item.LastApplyError is null ? "Готов" : "Ошибка")</td>
+                    <td>@(item.LastAppliedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                    <td>
+                        <button class="small-button" type="button" @onclick="(() => OpenEdit(item))">Изменить</button>
+                        <button class="small-button" type="button" @onclick="(() => Apply(item))">Применить</button>
+                        <button class="small-button" type="button" @onclick="(() => OpenLink(item))">Ссылка</button>
+                        <button class="small-button" type="button" @onclick="(() => Rotate(item))">Сменить ключ</button>
+                        <button class="small-button danger-button" type="button" @onclick="(() => Delete(item))">Удалить</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</section>
+<Modal Title="@(EditingId is null ? "Новый канал" : "Изменить канал")" Visible="EditVisible" OnClose="CloseEdit">
+    <Body>
+        <EditForm Model="Form" OnValidSubmit="Save">
+            <DataAnnotationsValidator />
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="channel-node">Нода</label>
+                    <select id="channel-node" class="form-control" @bind="Form.NodeId">
+                        @foreach (var node in NodeItems)
+                        {
+                            <option value="@node.Id">@node.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label for="channel-name">Канал</label>
+                    <InputText id="channel-name" class="form-control" @bind-Value="Form.Name" />
+                </div>
+                <div class="form-field">
+                    <label for="channel-port">Порт</label>
+                    <InputNumber id="channel-port" class="form-control" @bind-Value="Form.Port" />
+                </div>
+                <div class="form-field form-field-wide">
+                    <div class="label-with-help">
+                        <label for="channel-links">Ссылки</label>
+                        <button class="help-button" type="button" aria-label="Поддерживаемые ссылки"
+                                aria-expanded="@LinksHelpVisible" @onclick="ToggleLinksHelp">?</button>
+                        @if (LinksHelpVisible)
+                        {
+                            <div class="links-help" role="tooltip">
+                                <strong>Поддерживаются</strong>
+                                <span>Yandex Volga: docs.yandex.ru/edit/d/…</span>
+                                <span>Yandex Docs: docs.yandex.ru/edit/d/… или disk.yandex.ru/i/…</span>
+                                <span>Mail.ru: cloud.mail.ru/public/…</span>
+                                <span>Телемост: telemost.yandex.ru/j/…</span>
+                                <span>Яндекс Доска: boards.yandex.ru/whiteboard/?hash=…</span>
+                                <span>Avito: avito:код_комнат</span>
+                                <span>cups.online: cupsonline:код_комнат</span>
+                                <span>MAX: max:UID:Web-токен</span>
+                            </div>
+                        }
+                    </div>
+                    <InputText id="channel-links" class="form-control" @bind-Value="Form.Links" />
+                </div>
+                <div class="check-field">
+                    <InputCheckbox id="channel-enabled" @bind-Value="Form.IsEnabled" />
+                    <label for="channel-enabled">Включён</label>
+                </div>
+                <div class="check-field">
+                    <InputCheckbox id="channel-xray" @bind-Value="Form.UseXrayUpstream" />
+                    <label for="channel-xray">Через Xray</label>
+                </div>
+            </div>
+            <div class="form-hint">
+                OpenFlux exit-канал слушает указанный TCP-порт. В Docker откройте его вручную
+                в UFW на хосте: контейнер не может изменить firewall хоста.
+            </div>
+            <details class="form-details">
+                <summary>Дополнительно</summary>
+                <div class="form-field">
+                    <label for="channel-cookies">Cookies JSON</label>
+                    <InputTextArea id="channel-cookies" class="form-control" @bind-Value="Form.CookiesJson" />
+                </div>
+            </details>
+            @if (Error is not null)
+            {
+                <div class="form-error">@Error</div>
+            }
+            <div class="modal-footer">
+                <button class="secondary-button" type="button" @onclick="CloseEdit">Отмена</button>
+                <button class="primary-button" type="submit">Сохранить</button>
+            </div>
+        </EditForm>
+    </Body>
+</Modal>
+<Modal Title="Ссылка OpenFlux" Visible="LinkVisible" OnClose="CloseLink">
+    <Body>
+        <CopyField Value="@ShareLink" />
+        <div class="personal-qr">@((MarkupString)QrSvg.Generate(ShareLink))</div>
+    </Body>
+</Modal>
+
+@code {
+    private List<OpenFluxChannel> Items = [];
+    private List<Node> NodeItems = [];
+    private ChannelForm Form = new();
+    private int? EditingId;
+    private bool EditVisible;
+    private bool LinkVisible;
+    private string ShareLink = string.Empty;
+    private string? Error;
+    private bool LinksHelpVisible;
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        Items = await Service.List();
+        NodeItems = await Nodes.List();
+    }
+
+    private void OpenCreate()
+    {
+        EditingId = null;
+        Form = new ChannelForm
+        {
+            NodeId = NodeItems.FirstOrDefault()?.Id ?? 0
+        };
+        LinksHelpVisible = false;
+        EditVisible = true;
+    }
+
+    private void OpenEdit(OpenFluxChannel item)
+    {
+        EditingId = item.Id;
+        Form = ChannelForm.From(item);
+        LinksHelpVisible = false;
+        EditVisible = true;
+    }
+
+    private async Task Save()
+    {
+        try
+        {
+            if (EditingId is null)
+            {
+                await Service.Create(Form.ToInput());
+            }
+            else
+            {
+                await Service.Update(EditingId.Value, Form.ToInput());
+            }
+
+            EditVisible = false;
+            await Load();
+        }
+        catch (Exception exception)
+        {
+            Error = exception.Message;
+        }
+    }
+
+    private async Task Apply(OpenFluxChannel item)
+    {
+        await Service.Apply(item.Id);
+        await Load();
+        Toast.Success("Канал применён");
+    }
+
+    private void OpenLink(OpenFluxChannel item)
+    {
+        ShareLink = OpenFluxShare.Encode(Service.GetShareConfig(item));
+        LinkVisible = true;
+    }
+
+    private async Task Rotate(OpenFluxChannel item)
+    {
+        await Service.RotateKey(item.Id);
+        await Load();
+    }
+
+    private async Task Delete(OpenFluxChannel item)
+    {
+        await Service.Delete(item.Id);
+        await Load();
+    }
+
+    private void CloseEdit()
+    {
+        EditVisible = false;
+    }
+
+    private void CloseLink()
+    {
+        LinkVisible = false;
+    }
+
+    private void ToggleLinksHelp()
+    {
+        LinksHelpVisible = !LinksHelpVisible;
+    }
+
+    private static string Carriers(OpenFluxChannel item)
+    {
+        return string.Join(", ", Names(item));
+    }
+
+    private static IEnumerable<string> Names(OpenFluxChannel item)
+    {
+        if (item.VyandexUrl is not null)
+        {
+            yield return "Yandex";
+        }
+
+        if (item.YandexUrl is not null)
+        {
+            yield return "Docs";
+        }
+
+        if (item.MailruUrl is not null)
+        {
+            yield return "Mail.ru";
+        }
+
+        if (item.TelemostUrl is not null)
+        {
+            yield return "Телемост";
+        }
+
+        if (item.BoardsUrl is not null)
+        {
+            yield return "Доска";
+        }
+
+        if (item.AvitoUrl is not null)
+        {
+            yield return "Avito";
+        }
+
+        if (item.CupsUrl is not null)
+        {
+            yield return "cups.online";
+        }
+
+        if (item.MaxToken is not null)
+        {
+            yield return "MAX";
+        }
+    }
+}
