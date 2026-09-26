@@ -1,0 +1,181 @@
+@page "/mtproto"
+@rendermode InteractiveServer
+@using FrogPlug.Core
+@using FrogPlug.Server.Components.Shared
+@using FrogPlug.Server.Data
+@using FrogPlug.Server.Services
+@inject NodeService Nodes
+@inject NodeSyncService Sync
+@inject ToastService Toast
+
+<PageTitle>MTProto</PageTitle>
+<h1>MTProto</h1>
+<section class="panel table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Нода</th>
+                <th>Домен</th>
+                <th>Включён</th>
+                <th>Порт</th>
+                <th>Фронтинг</th>
+                <th>Секрет</th>
+                <th>Статус</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var node in Items)
+            {
+                <tr>
+                    <td>@node.Name</td>
+                    <td>@(node.Domain ?? "Нужен домен")</td>
+                    <td>
+                        <input id="mtproto-@node.Id" type="checkbox" checked="@node.MtprotoEnabled"
+                            disabled="@string.IsNullOrWhiteSpace(node.Domain)"
+                            @onchange="(() => Toggle(node))" />
+                    </td>
+                    <td>
+                        <input id="mtproto-port-@node.Id" class="form-control" type="number"
+                            @bind="node.MtprotoPort" />
+                    </td>
+                    <td>
+                        <input id="mtproto-fronting-port-@node.Id" class="form-control" type="number"
+                            @bind="node.MtprotoFrontingPort" />
+                    </td>
+                    <td>
+                        @if (node.MtprotoSecret is null)
+                        {
+                            <span>—</span>
+                        }
+                        else if (VisibleSecrets.Contains(node.Id))
+                        {
+                            <code>@node.MtprotoSecret</code>
+                        }
+                        else
+                        {
+                            <span>••••••••••••••••</span>
+                        }
+                        @if (node.MtprotoSecret is not null)
+                        {
+                            <button class="small-button" type="button" @onclick="(() => ShowSecret(node.Id))">
+                                Показать
+                            </button>
+                        }
+                    </td>
+                    <td>@(node.IsOnline ? "Нода онлайн" : "Нода недоступна")</td>
+                    <td>
+                        <button class="small-button" type="button" @onclick="(() => Apply(node))">Применить</button>
+                        <button class="small-button" type="button" @onclick="(() => SavePorts(node))">Сохранить порт</button>
+                        <button class="small-button" type="button" disabled="@string.IsNullOrWhiteSpace(node.Domain)"
+                            @onclick="(() => AskRegenerate(node))">Новый секрет</button>
+                        @if (node.MtprotoEnabled && node.MtprotoSecret is not null && node.Domain is not null)
+                        {
+                            <button class="small-button" type="button" @onclick="(() => OpenLinks(node))">Ссылки</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</section>
+<ConfirmDialog Visible="ConfirmVisible"
+    Text="Новый секрет потребует обновить прокси у всех пользователей. Продолжить?"
+    OnCancel="CloseConfirm"
+    OnConfirm="Regenerate" />
+<Modal Title="Ссылки MTProto" Visible="LinksVisible" OnClose="CloseLinks">
+    <Body>
+        <CopyField Value="@TgLink" />
+        <div class="personal-qr">@((MarkupString)QrSvg.Generate(TgLink))</div>
+        <CopyField Value="@HttpsLink" />
+        <div class="personal-qr">@((MarkupString)QrSvg.Generate(HttpsLink))</div>
+    </Body>
+</Modal>
+
+@code {
+    private List<Node> Items = [];
+    private HashSet<int> VisibleSecrets = [];
+    private Node? ConfirmNode;
+    private bool ConfirmVisible;
+    private bool LinksVisible;
+    private string TgLink = string.Empty;
+    private string HttpsLink = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        Items = await Nodes.List();
+    }
+
+    private async Task Toggle(Node node)
+    {
+        if (node.MtprotoEnabled)
+        {
+            await Nodes.DisableMtproto(node.Id);
+        }
+        else
+        {
+            await Nodes.EnableMtproto(node.Id);
+        }
+
+        await Load();
+    }
+
+    private async Task Apply(Node node)
+    {
+        await Sync.SyncNode(node.Id, true);
+        await Load();
+        Toast.Success("Настройки MTProto применены");
+    }
+
+    private async Task SavePorts(Node node)
+    {
+        await Nodes.SetMtprotoPorts(node.Id, node.MtprotoPort, node.MtprotoFrontingPort);
+        await Load();
+    }
+
+    private void ShowSecret(int nodeId)
+    {
+        VisibleSecrets.Add(nodeId);
+    }
+
+    private void AskRegenerate(Node node)
+    {
+        ConfirmNode = node;
+        ConfirmVisible = true;
+    }
+
+    private async Task Regenerate()
+    {
+        if (ConfirmNode is not null)
+        {
+            await Nodes.RegenerateMtprotoSecret(ConfirmNode.Id);
+            await Load();
+        }
+
+        ConfirmVisible = false;
+        ConfirmNode = null;
+    }
+
+    private void CloseConfirm()
+    {
+        ConfirmVisible = false;
+        ConfirmNode = null;
+    }
+
+    private void OpenLinks(Node node)
+    {
+        TgLink = MtprotoLinks.Tg(node.Domain ?? node.Address, NodePorts.Public, node.MtprotoSecret!);
+        HttpsLink = MtprotoLinks.Https(node.Domain ?? node.Address, NodePorts.Public, node.MtprotoSecret!);
+        LinksVisible = true;
+    }
+
+    private void CloseLinks()
+    {
+        LinksVisible = false;
+    }
+}
