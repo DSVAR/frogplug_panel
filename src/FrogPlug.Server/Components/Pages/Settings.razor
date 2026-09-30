@@ -1,0 +1,270 @@
+@page "/settings"
+@rendermode InteractiveServer
+@using System.Net
+@using FrogPlug.Server.Components.Shared
+@using FrogPlug.Server.Services
+@inject SettingsService Service
+@inject ITelegramNotifier Telegram
+@inject ToastService Toast
+@inject AuditService Audit
+
+<PageTitle>Настройки</PageTitle>
+<PageHeader Title="Настройки" Subtitle="Параметры панели и сервисов" />
+
+<div class="settings-tabs" role="tablist" aria-label="Разделы настроек">
+    @foreach (var tab in Tabs)
+    {
+        <button class="settings-tab @(ActiveTab == tab.Id ? "active" : string.Empty)"
+                type="button"
+                role="tab"
+                aria-selected="@(ActiveTab == tab.Id)"
+                @onclick="(() => ActiveTab = tab.Id)">
+            @tab.Label
+        </button>
+    }
+</div>
+
+<section class="panel settings-panel">
+    <EditForm Model="Form" OnValidSubmit="Save">
+        <DataAnnotationsValidator />
+        @if (ActiveTab == "general")
+        {
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="panel-domain">Домен панели</label>
+                    <InputText id="panel-domain" class="form-control" @bind-Value="Form.PanelDomain" />
+                    <button class="btn" type="button" @onclick="CheckDomain">Проверить</button>
+                    @if (!string.IsNullOrWhiteSpace(DomainCheckResult))
+                    {
+                        <small>@DomainCheckResult</small>
+                    }
+                </div>
+                <div class="form-field">
+                    <label for="public-base-url">Публичный URL</label>
+                    <InputText id="public-base-url" class="form-control" @bind-Value="Form.PublicBaseUrl" />
+                    <small>Используется для ссылок подписки.</small>
+                </div>
+                <div class="form-field">
+                    <label for="profile-title">Заголовок профиля</label>
+                    <InputText id="profile-title" class="form-control" @bind-Value="Form.ProfileTitle" />
+                </div>
+                <div class="form-field">
+                    <label for="support-url">URL поддержки</label>
+                    <InputText id="support-url" class="form-control" @bind-Value="Form.SupportUrl" />
+                </div>
+                <div class="form-field">
+                    <label for="subscription-hours">Интервал обновления подписки, часов</label>
+                    <InputNumber id="subscription-hours"
+                                 class="form-control"
+                                 @bind-Value="Form.SubscriptionUpdateHours" />
+                </div>
+            </div>
+        }
+        else if (ActiveTab == "subscription")
+        {
+            <div class="settings-switches">
+                <label class="settings-switch" for="direct-ru">
+                    <span>
+                        <strong>Русские сайты на устройстве</strong>
+                        <small>Добавляет маршрутизацию для Happ.</small>
+                    </span>
+                    <InputCheckbox id="direct-ru" @bind-Value="Form.DirectRuOnDevice" />
+                </label>
+                <label class="settings-switch" for="happ-routing">
+                    <span>
+                        <strong>Маршрутизация Happ</strong>
+                        <small>Передавать правила маршрутизации клиентам Happ.</small>
+                    </span>
+                    <InputCheckbox id="happ-routing" @bind-Value="Form.HappRoutingEnabled" />
+                </label>
+            </div>
+            <div class="form-field">
+                <label for="whitelist-sni">Белые списки: домены для маскировки</label>
+                <InputTextArea id="whitelist-sni" class="form-control" @bind-Value="Form.WhitelistSniSuggestions" />
+                <small>Один домен в строке. Список по умолчанию нужно обязательно проверить администратору.</small>
+            </div>
+        }
+        else if (ActiveTab == "services")
+        {
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="openflux-ref">Версия OpenFlux</label>
+                    <InputText id="openflux-ref" class="form-control" @bind-Value="Form.OpenFluxRef" />
+                </div>
+                <div class="form-field">
+                    <label for="openflux-installer-sha">SHA-256 node-install.sh</label>
+                    <InputText id="openflux-installer-sha"
+                               class="form-control"
+                               type="password"
+                               @bind-Value="Form.OpenFluxInstallerSha256" />
+                </div>
+                <div class="form-field">
+                    <label for="mtg-version">Версия mtg</label>
+                    <InputText id="mtg-version" class="form-control" @bind-Value="Form.MtgVersion" />
+                </div>
+                <div class="form-field">
+                    <label for="mtg-sha">SHA-256 mtg linux-amd64</label>
+                    <InputText id="mtg-sha"
+                               class="form-control"
+                               type="password"
+                               @bind-Value="Form.MtgSha256" />
+                </div>
+            </div>
+        }
+        else if (ActiveTab == "notifications")
+        {
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="telegram-token">Токен Telegram-бота</label>
+                    <InputText id="telegram-token"
+                               class="form-control"
+                               type="password"
+                               @bind-Value="Form.TelegramBotToken" />
+                </div>
+                <div class="form-field">
+                    <label for="telegram-chat-id">Telegram Chat ID</label>
+                    <InputText id="telegram-chat-id"
+                               class="form-control"
+                               @bind-Value="Form.TelegramChatId" />
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="backup-block">
+                <h2>Резервная копия базы</h2>
+                <p class="muted">Создаётся согласованная копия SQLite без остановки панели.</p>
+                <a class="btn btn-primary" href="admin/backup">
+                    <Icon Name="download" />
+                    Скачать базу
+                </a>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <div class="form-error">@Error</div>
+        }
+
+        @if (ActiveTab != "backup")
+        {
+            <div class="head-actions">
+                <button class="btn btn-primary" type="submit">Сохранить</button>
+                @if (ActiveTab == "notifications")
+                {
+                    <button class="btn" type="button" @onclick="SendTelegramTest">
+                        Отправить тестовое сообщение
+                    </button>
+                }
+            </div>
+        }
+    </EditForm>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<SettingsTab> Tabs =
+    [
+        new("general", "Основные"),
+        new("subscription", "Подписка"),
+        new("services", "Xray / OpenFlux / MTProto"),
+        new("notifications", "Уведомления"),
+        new("backup", "Резервные копии")
+    ];
+
+    private SettingsForm Form { get; set; } = new();
+    private string ActiveTab { get; set; } = "general";
+    private string? Error { get; set; }
+    private string? DomainCheckResult { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Form.PublicBaseUrl = await Service.GetPublicBaseUrl();
+        Form.PanelDomain = await Service.GetPanelDomain();
+        Form.ProfileTitle = await Service.GetProfileTitle();
+        Form.SupportUrl = await Service.GetSupportUrl();
+        Form.SubscriptionUpdateHours = await Service.GetSubscriptionUpdateHours();
+        Form.DirectRuOnDevice = await Service.GetDirectRuOnDevice();
+        Form.HappRoutingEnabled = await Service.GetHappRoutingEnabled();
+        Form.WhitelistSniSuggestions = await Service.GetWhitelistSniSuggestions();
+        Form.TelegramBotToken = await Service.GetTelegramBotToken();
+        Form.TelegramChatId = await Service.GetTelegramChatId();
+        Form.OpenFluxRef = await Service.GetOpenFluxRef();
+        Form.OpenFluxInstallerSha256 = await Service.GetOpenFluxInstallerSha256();
+        Form.MtgVersion = await Service.GetMtgVersion();
+        Form.MtgSha256 = await Service.GetMtgSha256();
+    }
+
+    private async Task Save()
+    {
+        try
+        {
+            await Service.SetPublicBaseUrl(Form.PublicBaseUrl);
+            await Service.SetPanelDomain(Form.PanelDomain);
+            await Service.SetProfileTitle(Form.ProfileTitle);
+            await Service.SetSupportUrl(Form.SupportUrl);
+            await Service.SetSubscriptionUpdateHours(Form.SubscriptionUpdateHours);
+            await Service.SetDirectRuOnDevice(Form.DirectRuOnDevice);
+            await Service.SetHappRoutingEnabled(Form.HappRoutingEnabled);
+            await Service.SetWhitelistSniSuggestions(Form.WhitelistSniSuggestions);
+            await Service.SetTelegramBotToken(Form.TelegramBotToken);
+            await Service.SetTelegramChatId(Form.TelegramChatId);
+            await Service.SetOpenFluxRef(Form.OpenFluxRef);
+            await Service.SetOpenFluxInstallerSha256(Form.OpenFluxInstallerSha256);
+            await Service.SetMtgVersion(Form.MtgVersion);
+            await Service.SetMtgSha256(Form.MtgSha256);
+            await Audit.Write(AuditActions.SettingsUpdate);
+            Error = null;
+            Toast.Success("Настройки сохранены");
+        }
+        catch (ValidationException exception)
+        {
+            Error = exception.Message;
+        }
+    }
+
+    private async Task SendTelegramTest()
+    {
+        if (await Telegram.Send("Тестовое сообщение VPN"))
+        {
+            Toast.Success("Тестовое сообщение отправлено");
+            return;
+        }
+
+        Toast.Error("Не удалось отправить тестовое сообщение");
+    }
+
+    private async Task CheckDomain()
+    {
+        if (string.IsNullOrWhiteSpace(Form.PanelDomain)
+            || Uri.CheckHostName(Form.PanelDomain.Trim()) != UriHostNameType.Dns)
+        {
+            DomainCheckResult = "Укажите корректное доменное имя";
+            return;
+        }
+
+        var addresses = await Dns.GetHostAddressesAsync(Form.PanelDomain.Trim());
+        DomainCheckResult = addresses.Length == 0
+            ? "DNS-записи не найдены"
+            : $"Найдены: {string.Join(", ", addresses.Select(address => address.ToString()))}";
+    }
+
+    private sealed class SettingsForm
+    {
+        public string? PanelDomain { get; set; }
+        public string? PublicBaseUrl { get; set; }
+        public string? ProfileTitle { get; set; }
+        public string? SupportUrl { get; set; }
+        public int SubscriptionUpdateHours { get; set; } = 12;
+        public bool DirectRuOnDevice { get; set; } = true;
+        public bool HappRoutingEnabled { get; set; } = true;
+        public string WhitelistSniSuggestions { get; set; } = string.Empty;
+        public string? TelegramBotToken { get; set; }
+        public string? TelegramChatId { get; set; }
+        public string? OpenFluxRef { get; set; }
+        public string? OpenFluxInstallerSha256 { get; set; }
+        public string? MtgVersion { get; set; }
+        public string? MtgSha256 { get; set; }
+    }
+
+    private sealed record SettingsTab(string Id, string Label);
+}
