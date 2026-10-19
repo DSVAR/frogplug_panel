@@ -1,0 +1,6 @@
+[Unit]
+Description=FrogPlug SQLite backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/frogplug-backup
