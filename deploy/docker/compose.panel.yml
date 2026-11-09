@@ -1,0 +1,22 @@
+services:
+  panel:
+    image: ${PANEL_IMAGE:?set PANEL_IMAGE}
+    restart: unless-stopped
+    environment:
+      PublicBaseUrl: ${PUBLIC_BASE_URL:?задайте PUBLIC_BASE_URL}
+      PanelPath: ${PANEL_PATH:-}
+      SubscriptionPath: ${SUBSCRIPTION_PATH:-}
+      DataDirectory: /data
+      TrustedProxyNetworks: 172.16.0.0/12
+    ports:
+      - "127.0.0.1:5280:5280"
+    volumes:
+      - panel-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5280${PANEL_PATH:-}/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  panel-data:

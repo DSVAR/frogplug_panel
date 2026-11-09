@@ -1,0 +1,7 @@
+.git
+**/bin
+**/obj
+appdata
+artifacts/*.tar
+artifacts/*.tar.gz
+artifacts/panel

@@ -1,0 +1,35 @@
+services:
+  node:
+    image: ${NODE_IMAGE:?set NODE_IMAGE}
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      ServiceMode: docker
+      PanelUrl: ${PANEL_URL:-}
+      Token: ${AGENT_TOKEN:-}
+      PanelUpstream: ${PanelUpstream:-}
+      PanelPath: ${PANEL_PATH:-}
+      SubscriptionPath: ${SUBSCRIPTION_PATH:-}
+      XrayConfigPath: /etc/xray/config.json
+      GeoDir: /etc/xray
+      CaddyfilePath: /etc/caddy/Caddyfile
+      XrayBinary: /usr/local/bin/xray
+      MtgBinary: /usr/local/bin/mtg
+      TgWebBinary: /usr/local/bin/tproxy-server
+      HysteriaBinary: /usr/local/bin/hysteria
+    volumes:
+      - ${NODE_CONFIG_DIR:?задайте NODE_CONFIG_DIR}/haproxy:/etc/haproxy
+      - ${NODE_CONFIG_DIR:?задайте NODE_CONFIG_DIR}/caddy:/etc/caddy
+      - ${NODE_CONFIG_DIR:?задайте NODE_CONFIG_DIR}/xray:/etc/xray
+      - ${NODE_CONFIG_DIR:?задайте NODE_CONFIG_DIR}/agent:/etc/frogplug-agent
+      - ${NODE_CONFIG_DIR:?задайте NODE_CONFIG_DIR}/mtg.toml:/etc/mtg.toml
+      - ${NODE_CONFIG_DIR:?задайте NODE_CONFIG_DIR}/hysteria:/etc/hysteria
+      - ${NODE_CONFIG_DIR:?задайте NODE_CONFIG_DIR}/openflux:/etc/openflux-node
+      - ${NODE_CONFIG_DIR:?задайте NODE_CONFIG_DIR}/supervisor:/etc/supervisor/conf.d
+      - ${NODE_DATA_DIR:?задайте NODE_DATA_DIR}:/var/lib/frogplug
+      - ${NODE_DATA_DIR:?задайте NODE_DATA_DIR}/openflux:/var/lib/openflux-node
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
