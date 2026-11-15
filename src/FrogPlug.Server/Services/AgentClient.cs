@@ -121,17 +121,26 @@ public sealed class AgentClient(AgentTunnelRegistry tunnels) : IAgentClient
 
     private async Task<T?> Send<T>(Node node, HttpMethod method, string path, object? body, CancellationToken cancellationToken)
     {
-        var timeout = path.StartsWith("/xray/update", StringComparison.Ordinal)
-            ? TimeSpan.FromMinutes(5)
-            : path.StartsWith("/mask/scan", StringComparison.Ordinal)
-                ? TimeSpan.FromMinutes(3)
-            : TimeSpan.FromSeconds(30);
         return await tunnels.SendAsync<T>(
             node.Id,
             method.Method,
             path,
             body,
-            timeout,
+            TimeoutFor(path),
             cancellationToken);
+    }
+
+    // Опрос статуса должен быть быстрым. Остальные запросы запускают сервисы и скачивают файлы,
+    // на ноде с одним ядром это легко дольше 30 секунд.
+    public static TimeSpan TimeoutFor(string path)
+    {
+        if (path.StartsWith("/status", StringComparison.Ordinal))
+        {
+            return TimeSpan.FromSeconds(30);
+        }
+
+        return path.StartsWith("/xray/update", StringComparison.Ordinal)
+            ? TimeSpan.FromMinutes(5)
+            : TimeSpan.FromMinutes(3);
     }
 }
