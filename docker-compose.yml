@@ -1,0 +1,28 @@
+services:
+  panel:
+    image: frogplug/panel:local
+    build:
+      context: .
+      dockerfile: deploy/docker/panel/Dockerfile
+
+  node:
+    image: frogplug/node:local
+    build:
+      context: .
+      dockerfile: deploy/docker/node/Dockerfile
+      args:
+        XRAY_VERSION: ${XRAY_VERSION:-v25.10.15}
+        CADDY_VERSION: ${CADDY_VERSION}
+        CADDY_SHA256_AMD64: ${CADDY_SHA256_AMD64}
+        CADDY_SHA256_ARM64: ${CADDY_SHA256_ARM64}
+        MTG_VERSION: ${MTG_VERSION}
+        MTG_SHA256_AMD64: ${MTG_SHA256_AMD64}
+        MTG_SHA256_ARM64: ${MTG_SHA256_ARM64}
+        OPENFLUX_VERSION: ${OPENFLUX_VERSION}
+        OPENFLUX_SHA256_AMD64: ${OPENFLUX_SHA256_AMD64}
+        OPENFLUX_SHA256_ARM64: ${OPENFLUX_SHA256_ARM64}
+        HYSTERIA_VERSION: ${HYSTERIA_VERSION}
+        HYSTERIA_SHA256_AMD64: ${HYSTERIA_SHA256_AMD64}
+        HYSTERIA_SHA256_ARM64: ${HYSTERIA_SHA256_ARM64}
+        TPROXY_REF: ${TPROXY_REF}
+        MTPROXY_REF: ${MTPROXY_REF}
