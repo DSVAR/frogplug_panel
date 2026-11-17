@@ -57,11 +57,49 @@ public sealed class XrayConfigBuilderTests
     }
 
     [Fact]
-    public void Missing_role_target_is_direct()
+    public void Missing_role_target_is_blocked()
     {
         var rules = new[] { new RuleSpec { Kind = "Domain", Value = "x", Target = "role:Exit" } };
         var routingRules = RoutingRules(Config(Node(1), [Node(1)], rules));
-        Assert.Equal("direct", (string?)routingRules[2]!["outboundTag"]);
+        Assert.Equal("block", (string?)routingRules[2]!["outboundTag"]);
+    }
+
+    [Fact]
+    public void Exit_pool_balances_two_healthy_nodes()
+    {
+        var main = Node(1, "Entry, RuExit");
+        var firstExit = Node(2, "Exit");
+        var secondExit = Node(3, "Exit");
+        var config = Config(main, [main, firstExit, secondExit], []);
+
+        var balancer = config["routing"]!["balancers"]![0]!;
+        Assert.Equal("balancer-exit", (string?)balancer["tag"]);
+        Assert.Equal(["node-2", "node-3"], balancer["selector"]!.AsArray().Select(item => (string?)item).ToArray());
+        Assert.Equal("roundRobin", (string?)balancer["strategy"]!["type"]);
+        Assert.Equal("block", (string?)balancer["fallbackTag"]);
+        Assert.Equal("balancer-exit", (string?)RoutingRules(config).Last()!["balancerTag"]);
+        Assert.NotNull(config["observatory"]);
+    }
+
+    [Fact]
+    public void Single_exit_is_used_without_balancer()
+    {
+        var main = Node(1, "Entry, RuExit");
+        var exit = Node(2, "Exit");
+        var config = Config(main, [main, exit], []);
+
+        Assert.Null(config["routing"]!["balancers"]);
+        Assert.Equal("node-2", (string?)RoutingRules(config).Last()!["outboundTag"]);
+        Assert.Null(config["observatory"]);
+    }
+
+    [Fact]
+    public void Russian_main_blocks_foreign_traffic_without_exits()
+    {
+        var main = Node(1, "Entry, RuExit");
+        var config = Config(main, [main], []);
+
+        Assert.Equal("block", (string?)RoutingRules(config).Last()!["outboundTag"]);
     }
 
     [Fact]

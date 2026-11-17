@@ -319,6 +319,31 @@ small,
     color: var(--text);
     background: rgba(255, 255, 255, .03);
     cursor: pointer;
+    transition: transform 80ms ease, box-shadow 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+
+/* Клик остаётся заметным: кнопка утапливается в момент нажатия,
+   а рамка фокуса показывает последнее выбранное действие. */
+.btn:active,
+.primary-button:active,
+.secondary-button:active,
+.danger-button:active,
+.small-button:active {
+    transform: translateY(1px) scale(.98);
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .32), 0 0 0 4px rgba(101, 178, 255, .22);
+}
+
+.btn:focus,
+.primary-button:focus,
+.secondary-button:focus,
+.danger-button:focus,
+.small-button:focus {
+    outline: 2px solid rgba(101, 178, 255, .9);
+    outline-offset: 2px;
+}
+
+.danger-button:active {
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .35), 0 0 0 4px rgba(255, 98, 116, .28);
 }
 
 .btn-primary,

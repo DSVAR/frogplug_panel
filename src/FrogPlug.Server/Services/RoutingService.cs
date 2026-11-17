@@ -14,7 +14,7 @@ public sealed class RoutingService(AppDbContext db, AuditService audit, SyncQueu
         (RoutingMatchType.Domain, "su", "role:RuExit", string.Empty),
         (RoutingMatchType.Domain, "xn--p1ai", "role:RuExit", string.Empty),
         (RoutingMatchType.Geoip, "ru", "role:RuExit", string.Empty),
-        (RoutingMatchType.Geosite, "google", "role:GoogleExit", string.Empty)
+        (RoutingMatchType.Geosite, "google", "role:Exit", string.Empty)
     ];
 
     public Task<List<RoutingRule>> List()
@@ -154,7 +154,7 @@ public sealed class RoutingService(AppDbContext db, AuditService audit, SyncQueu
 
     private async Task ValidateTarget(string target)
     {
-        if (target is "direct" or "block" or "role:RuExit" or "role:GoogleExit")
+        if (target is "direct" or "block" or "role:Exit" or "role:RuExit" or "role:GoogleExit")
         {
             return;
         }

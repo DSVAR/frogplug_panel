@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace FrogPlug.Core;
 
@@ -100,10 +101,14 @@ public static class XrayConfigBuilder
             sniffing = new { enabled = true, destOverride = new[] { "http", "tls", "quic" } }
         });
 
+        // Xray-balancer pools.
+        var useExitPoolByDefault = self.HasRole("Entry") && self.HasRole("RuExit") && !self.HasRole("WhitelistEntry");
+        var rolePools = BuildRolePools(self, enabledNodes, rules, useExitPoolByDefault);
         var targets = rules.Where(rule => rule.IsEnabled)
-            .Select(rule => ResolveTarget(rule.Target, self, enabledNodes))
+            .SelectMany(rule => NodesForTarget(rule.Target, self, enabledNodes))
             .Append(WhitelistExitTarget(self, enabledNodes))
             .Where(target => target.StartsWith("node-", StringComparison.Ordinal))
+            .Concat(rolePools.Values.SelectMany(pool => pool.Select(node => $"node-{node.Id}")))
             .Distinct()
             .ToArray();
         var outbounds = new List<object>
@@ -146,7 +151,18 @@ public static class XrayConfigBuilder
             });
         }
 
-        // Правила маршрутизации.
+        var balancers = rolePools
+            .Where(pair => pair.Value.Count > 1)
+            .Select(pair => new
+            {
+                tag = BalancerTag(pair.Key),
+                selector = pair.Value.Select(node => $"node-{node.Id}").ToArray(),
+                fallbackTag = "block",
+                strategy = new { type = "roundRobin" }
+            })
+            .ToArray();
+
+        // Routing rules.
         var routingRules = new List<object>
         {
             new { type = "field", inboundTag = new[] { "api" }, outboundTag = "api" },
@@ -154,7 +170,7 @@ public static class XrayConfigBuilder
         };
         var blockRules = rules.Where(rule => rule.IsEnabled && string.Equals(rule.Target, "block", StringComparison.OrdinalIgnoreCase))
             .OrderBy(rule => rule.Order);
-        routingRules.AddRange(blockRules.Select(rule => ToRoutingRule(rule)).Select(rule => rule with { outboundTag = "block" }));
+        routingRules.AddRange(blockRules.Select(rule => ToRoutingRule(rule, RouteDestination.Outbound("block"))));
         var cascadeEmails = cascadeNodes.Select(node => $"node{node.Id}").ToArray();
         if (cascadeEmails.Length > 0)
         {
@@ -168,19 +184,33 @@ public static class XrayConfigBuilder
         }
 
         routingRules.AddRange(nonBlockRules
-            .OrderBy(rule => rule.Order).Select(rule => ToRoutingRule(rule, self, enabledNodes)));
+            .OrderBy(rule => rule.Order)
+            .Select(rule => ToRoutingRule(rule, ResolveRouteTarget(rule.Target, self, enabledNodes, rolePools))));
         var whitelistExit = WhitelistExitTarget(self, enabledNodes);
         if (whitelistExit.StartsWith("node-", StringComparison.Ordinal))
         {
             routingRules.Add(new { type = "field", inboundTag = new[] { "vless-reality", "vless-xhttp" }, outboundTag = whitelistExit });
         }
-        var config = new
+        else if (useExitPoolByDefault)
         {
-            log = new { loglevel = "warning", access = "none" },
+            routingRules.Add(ToDefaultExitRule(ResolveRouteTarget("role:Exit", self, enabledNodes, rolePools)));
+        }
+        var routing = new Dictionary<string, object>
+        {
+            ["domainStrategy"] = "IPIfNonMatch",
+            ["rules"] = routingRules
+        };
+        if (balancers.Length > 0)
+        {
+            routing["balancers"] = balancers;
+        }
+        var config = new Dictionary<string, object>
+        {
+            ["log"] = new { loglevel = "warning", access = "none" },
             // Статистика трафика и API ядра.
-            api = new { tag = "api", services = new[] { "StatsService", "HandlerService" } },
-            stats = new { },
-            policy = new
+            ["api"] = new { tag = "api", services = new[] { "StatsService", "HandlerService" } },
+            ["stats"] = new { },
+            ["policy"] = new
             {
                 levels = new Dictionary<string, object>
                 {
@@ -194,49 +224,84 @@ public static class XrayConfigBuilder
                     statsOutboundDownlink = true
                 }
             },
-            inbounds,
-            outbounds,
-            routing = new { domainStrategy = "IPIfNonMatch", rules = routingRules }
+            ["inbounds"] = inbounds,
+            ["outbounds"] = outbounds,
+            ["routing"] = routing
         };
+        if (balancers.Length > 0)
+        {
+            config["observatory"] = new
+            {
+                subjectSelector = balancers.SelectMany(item => item.selector).ToArray(),
+                probeUrl = "https://www.gstatic.com/generate_204",
+                probeInterval = "10s",
+                enableConcurrency = true
+            };
+        }
         return JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private static string ResolveTarget(string target, NodeSpec self, IReadOnlyList<NodeSpec> nodes)
+    private static Dictionary<string, List<NodeSpec>> BuildRolePools(
+        NodeSpec self,
+        IReadOnlyList<NodeSpec> nodes,
+        IReadOnlyList<RuleSpec> rules,
+        bool useExitPoolByDefault)
+    {
+        var roles = rules.Where(rule => rule.IsEnabled && rule.Target.StartsWith("role:", StringComparison.OrdinalIgnoreCase))
+            .Select(rule => rule.Target[5..])
+            .Append(useExitPoolByDefault ? "Exit" : string.Empty)
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        return roles.ToDictionary(
+            role => role,
+            role => NodesForRole(role, self, nodes).ToList(),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static RouteDestination ResolveRouteTarget(
+        string target,
+        NodeSpec self,
+        IReadOnlyList<NodeSpec> nodes,
+        IReadOnlyDictionary<string, List<NodeSpec>> rolePools)
     {
         if (string.Equals(target, "direct", StringComparison.OrdinalIgnoreCase))
         {
-            return "direct";
+            return RouteDestination.Outbound("direct");
         }
         if (target.StartsWith("role:", StringComparison.OrdinalIgnoreCase))
         {
-            var node = nodes.FirstOrDefault(item => item.HasRole(target[5..]));
-            if (node is null || node.Id == self.Id)
+            var role = target[5..];
+            var pool = rolePools.GetValueOrDefault(role) ?? [];
+            if (pool.Count > 1)
             {
-                return "direct";
+                return RouteDestination.Balancer(BalancerTag(role));
             }
-
-            return $"node-{node.Id}";
+            if (pool.Count == 1)
+            {
+                return RouteDestination.Outbound($"node-{pool[0].Id}");
+            }
+            return self.HasRole(role) ? RouteDestination.Outbound("direct") : RouteDestination.Outbound("block");
         }
         if (target.StartsWith("node:", StringComparison.OrdinalIgnoreCase) && int.TryParse(target[5..], out var id))
         {
             if (id == self.Id)
             {
-                return "direct";
+                return RouteDestination.Outbound("direct");
             }
 
             if (nodes.Any(item => item.Id == id))
             {
-                return $"node-{id}";
+                return RouteDestination.Outbound($"node-{id}");
             }
 
-            return "direct";
+            return RouteDestination.Outbound("block");
         }
         if (string.Equals(target, "block", StringComparison.OrdinalIgnoreCase))
         {
-            return "block";
+            return RouteDestination.Outbound("block");
         }
 
-        return "direct";
+        return RouteDestination.Outbound("block");
     }
 
     private static string RealityServerName(NodeSpec node)
@@ -264,9 +329,8 @@ public static class XrayConfigBuilder
             return true;
         }
 
-        return rules
-            .Where(rule => rule.IsEnabled)
-            .Select(rule => ResolveTarget(rule.Target, source, nodes))
+        return rules.Where(rule => rule.IsEnabled)
+            .SelectMany(rule => NodesForTarget(rule.Target, source, nodes))
             .Any(target => target == $"node-{destination.Id}");
     }
 
@@ -277,9 +341,34 @@ public static class XrayConfigBuilder
             : "direct";
     }
 
-    private static RoutingObject ToRoutingRule(RuleSpec rule, NodeSpec? self = null, IReadOnlyList<NodeSpec>? nodes = null)
+    private static IEnumerable<string> NodesForTarget(string target, NodeSpec self, IReadOnlyList<NodeSpec> nodes)
     {
-        var field = new RoutingObject { type = "field", outboundTag = self is null ? rule.Target : ResolveTarget(rule.Target, self, nodes ?? []) };
+        if (target.StartsWith("role:", StringComparison.OrdinalIgnoreCase))
+        {
+            return NodesForRole(target[5..], self, nodes).Select(node => $"node-{node.Id}");
+        }
+        if (target.StartsWith("node:", StringComparison.OrdinalIgnoreCase) && int.TryParse(target[5..], out var id) && id != self.Id && nodes.Any(node => node.Id == id))
+        {
+            return [$"node-{id}"];
+        }
+        return [];
+    }
+
+    private static IEnumerable<NodeSpec> NodesForRole(string role, NodeSpec self, IReadOnlyList<NodeSpec> nodes)
+    {
+        var pool = nodes.Where(node => node.Id != self.Id && node.HasRole(role));
+        if (role.Equals("GoogleExit", StringComparison.OrdinalIgnoreCase) && !pool.Any())
+        {
+            pool = nodes.Where(node => node.Id != self.Id && node.HasRole("Exit"));
+        }
+        return pool;
+    }
+
+    private static string BalancerTag(string role) => $"balancer-{role.ToLowerInvariant()}";
+
+    private static RoutingObject ToRoutingRule(RuleSpec rule, RouteDestination destination)
+    {
+        var field = new RoutingObject { type = "field", outboundTag = destination.OutboundTag, balancerTag = destination.BalancerTag };
         switch (rule.Kind.ToLowerInvariant())
         {
             case "geosite":
@@ -304,12 +393,30 @@ public static class XrayConfigBuilder
         return field;
     }
 
+    private static RoutingObject ToDefaultExitRule(RouteDestination destination) => new()
+    {
+        type = "field",
+        inboundTag = new[] { "vless-reality", "vless-xhttp" },
+        outboundTag = destination.OutboundTag,
+        balancerTag = destination.BalancerTag
+    };
+
     private sealed record RoutingObject
     {
         public string type { get; init; } = "field";
-        public string outboundTag { get; init; } = "direct";
+        public string? outboundTag { get; init; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? balancerTag { get; init; }
         public string[]? domain { get; set; }
         public string[]? ip { get; set; }
         public string? port { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[]? inboundTag { get; init; }
+    }
+
+    private sealed record RouteDestination(string? OutboundTag, string? BalancerTag)
+    {
+        public static RouteDestination Outbound(string tag) => new(tag, null);
+        public static RouteDestination Balancer(string tag) => new(null, tag);
     }
 }
