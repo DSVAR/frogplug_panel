@@ -14,7 +14,8 @@ public static class CaddyfileBuilder
         string? panelUpstream = null,
         string? panelPath = null,
         string? subscriptionPath = null,
-        bool tgWebEnabled = false)
+        bool tgWebEnabled = false,
+        string? docsHost = null)
     {
         if (string.IsNullOrWhiteSpace(domain))
         {
@@ -27,6 +28,7 @@ public static class CaddyfileBuilder
         }
 
         var host = domain.Trim();
+        var docs = docsHost?.Trim();
         var lines = new List<string>
         {
             "{",
@@ -49,7 +51,7 @@ public static class CaddyfileBuilder
             "}",
             string.Empty,
             "http:// {",
-            $"    @foreign not host {host}",
+            $"    @foreign not host {host}{(string.IsNullOrWhiteSpace(docs) ? string.Empty : $" {docs}")}",
             "    respond @foreign 404",
             "}",
             string.Empty,
@@ -82,6 +84,20 @@ public static class CaddyfileBuilder
 
         AddStubSite(lines);
         lines.Add("}");
+        if (!string.IsNullOrWhiteSpace(docs) &&
+            !string.Equals(docs, host, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(docs, mtprotoHost?.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"http://{docs} {{");
+            lines.Add("    redir https://{host}{uri} permanent");
+            lines.Add("}");
+            lines.Add(string.Empty);
+            lines.Add($"https://{docs}:{NodePorts.CaddyTls} {{");
+            lines.Add("    bind 127.0.0.1");
+            AddStubSite(lines);
+            lines.Add("}");
+        }
         if (!string.IsNullOrWhiteSpace(mtprotoHost) &&
             !string.Equals(mtprotoHost.Trim(), host, StringComparison.OrdinalIgnoreCase))
         {

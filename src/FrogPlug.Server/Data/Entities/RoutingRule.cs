@@ -7,7 +7,8 @@ public enum RoutingMatchType
     Domain,
     Full,
     Ip,
-    Port
+    Port,
+    Protocol
 }
 
 public sealed class RoutingRule

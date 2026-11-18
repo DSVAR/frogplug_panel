@@ -23,7 +23,8 @@ public sealed record CaddyApplyRequest(
     string? AcmeEmail = null,
     bool XhttpEnabled = true,
     string? MtprotoHost = null,
-    bool TgWebEnabled = false);
+    bool TgWebEnabled = false,
+    string? DocsHost = null);
 
 public sealed record HaproxyApplyRequest(bool MtprotoEnabled, string? MtprotoHost);
 

@@ -5,6 +5,20 @@ PANEL_URL="${FROGPLUG_PANEL_URL:-}"
 TOKEN=""
 xray_source="panel"
 XRAY_VERSION=""
+step=0
+
+progress() {
+    step=$((step + 1))
+    printf '\n[%s/7] %s\n' "$step" "$1"
+}
+
+fail() {
+    echo
+    echo "Установка FrogPlug не завершена. Проверьте сообщение выше."
+    echo "Журнал агента: journalctl -u frogplug-agent -n 50 --no-pager"
+}
+
+trap fail ERR
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --panel-url) PANEL_URL="$2"; shift 2 ;;
@@ -21,8 +35,13 @@ done
     exit 2
 }
 
+progress "Устанавливаю системные зависимости"
 apt-get update
-apt-get install -y curl unzip ca-certificates apt-transport-https haproxy ufw
+apt-get install -y curl unzip ca-certificates apt-transport-https gnupg haproxy ufw
+command -v gpg >/dev/null 2>&1 || {
+    echo "Не удалось установить gnupg." >&2
+    exit 1
+}
 arch="$(uname -m)"
 case "$arch" in
     x86_64) rid="linux-x64"; xray_asset="Xray-linux-64.zip" ;;
@@ -32,11 +51,13 @@ esac
 install -d -m 0755 /etc/frogplug-agent /usr/local/etc/xray /usr/local/share/xray
 id -u xray >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin xray
 
+progress "Скачиваю агент FrogPlug"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 curl -fsSL "${PANEL_URL%/}/agent/download/${rid}" -o "$tmpdir/agent"
 install -m 0755 "$tmpdir/agent" /usr/local/bin/frogplug-agent
 
+progress "Скачиваю Xray"
 if [[ -z "$XRAY_VERSION" ]]; then
     XRAY_VERSION="$(curl -fsSL "${PANEL_URL%/}/agent/xray/default")"
 fi
@@ -63,6 +84,7 @@ actual="$(sha256sum "$tmpdir/xray.zip" | cut -d' ' -f1)"
 unzip -oq "$tmpdir/xray.zip" xray -d "$tmpdir/xray"
 install -m 0755 "$tmpdir/xray/xray" /usr/local/bin/xray
 
+progress "Устанавливаю Caddy"
 if ! command -v caddy >/dev/null 2>&1; then
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
@@ -70,6 +92,7 @@ if ! command -v caddy >/dev/null 2>&1; then
     apt-get install -y caddy
 fi
 
+progress "Сохраняю настройки сервера"
 cat > /etc/frogplug-agent/agent.json <<EOF
 {
   "Listen": "127.0.0.1:9080",
@@ -83,6 +106,7 @@ cat > /etc/frogplug-agent/agent.json <<EOF
 EOF
 chmod 600 /etc/frogplug-agent/agent.json
 
+progress "Запускаю службы"
 cat > /etc/systemd/system/frogplug-agent.service <<'EOF'
 [Unit]
 Description=FrogPlug agent
@@ -124,3 +148,15 @@ ufw allow 443/tcp
 ufw delete allow 8443/tcp || true
 ufw delete allow 2443/tcp || true
 ufw --force enable
+
+progress "Проверяю подключение"
+systemctl is-active --quiet frogplug-agent
+echo
+echo "Готово. Агент подключается к панели: $PANEL_URL"
+if systemctl is-active --quiet xray; then
+    echo "Xray запущен."
+else
+    echo "Xray будет запущен после первого применения конфига из панели."
+fi
+echo "Сервер установлен в systemd-режиме, Docker для этой ноды не используется."
+echo "Проверьте статус в панели через 10–30 секунд."

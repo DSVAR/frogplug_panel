@@ -27,6 +27,14 @@ public sealed class SettingsService(AppDbContext db)
         return Get("SupportUrl");
     }
 
+    public Task<string?> GetDocsDomain() => Get("DocsDomain");
+
+    public async Task<string> GetExitBalanceStrategy()
+    {
+        var value = await Get("ExitBalanceStrategy");
+        return value is "leastPing" or "roundRobin" ? value : "roundRobin";
+    }
+
     public async Task<int> GetSubscriptionUpdateHours()
     {
         var value = await Get("SubscriptionUpdateHours");
@@ -91,6 +99,11 @@ public sealed class SettingsService(AppDbContext db)
     public Task SetProfileTitle(string? value) => Set("ProfileTitle", value);
 
     public Task SetSupportUrl(string? value) => Set("SupportUrl", value);
+
+    public Task SetDocsDomain(string? value) => Set("DocsDomain", value);
+
+    public Task SetExitBalanceStrategy(string value) =>
+        Set("ExitBalanceStrategy", value is "leastPing" ? value : "roundRobin");
 
     public Task SetTelegramBotToken(string? value) => Set("TelegramBotToken", value);
 

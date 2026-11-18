@@ -9,6 +9,7 @@ public sealed class RoutingService(AppDbContext db, AuditService audit, SyncQueu
     private static readonly (RoutingMatchType Type, string Value, string Target, string Comment)[] Defaults =
     [
         (RoutingMatchType.Geosite, "category-ads-all", "block", "Реклама"),
+        (RoutingMatchType.Protocol, "bittorrent", "block", "Торренты"),
         (RoutingMatchType.Geosite, "category-ru", "role:RuExit", string.Empty),
         (RoutingMatchType.Domain, "ru", "role:RuExit", string.Empty),
         (RoutingMatchType.Domain, "su", "role:RuExit", string.Empty),

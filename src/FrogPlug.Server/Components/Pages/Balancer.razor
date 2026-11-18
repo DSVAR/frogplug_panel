@@ -1,0 +1,80 @@
+@page "/balancer"
+@rendermode InteractiveServer
+@using FrogPlug.Server.Services
+@inject NodeService Nodes
+@inject AgentTunnelRegistry Tunnels
+@inject SettingsService Settings
+@inject NodeSyncService Sync
+@inject FrogPlug.Server.Components.Shared.ToastService Toast
+
+<PageTitle>Балансировщик</PageTitle>
+
+<PageHeader Title="Балансировщик" Subtitle="Зарубежные выходы для не-RU трафика" />
+
+<section class="panel">
+    <h2>Как работает</h2>
+    <p class="muted">MAIN с ролями «Вход + RU-выход» отправляет RU-сайты через РФ. Все остальные сайты направляются в активные ноды с ролью «Выход».</p>
+    <div class="form-field">
+        <label for="balance-strategy">Стратегия распределения</label>
+        <select id="balance-strategy" class="form-control" @bind="Strategy">
+            <option value="roundRobin">По кругу (Round Robin)</option>
+            <option value="leastPing">Минимальная задержка (Least Ping)</option>
+        </select>
+        <small>При падении всех Exit-нод не-RU трафик блокируется, чтобы не выйти напрямую через RU.</small>
+        <button class="primary-button" type="button" @onclick="Save">Сохранить и применить</button>
+    </div>
+    @if (ExitNodes.Count == 0)
+    {
+        <div class="alert alert-error"><Icon Name="warning" /><span>Нет зарубежных выходов: не-RU трафик будет заблокирован.</span></div>
+    }
+    else if (ExitNodes.Count == 1)
+    {
+        <div class="alert alert-success"><Icon Name="check" /><span>Один зарубежный выход: весь не-RU трафик идёт через @ExitNodes[0].Name.</span></div>
+    }
+    else
+    {
+        <div class="alert alert-success"><Icon Name="check" /><span>@ExitNodes.Count зарубежных выхода: новые соединения распределяются по кругу; недоступные ноды исключаются.</span></div>
+    }
+</section>
+
+<section class="panel table-wrap">
+    <table class="data-table">
+        <thead><tr><th>Нода</th><th>Адрес</th><th>Страна</th><th>Онлайн</th><th>Роль</th></tr></thead>
+        <tbody>
+        @foreach (var node in ExitNodes)
+        {
+            <tr>
+                <td>@node.Name</td>
+                <td>@node.Address</td>
+                <td>@node.Country</td>
+                <td>@(Tunnels.IsConnected(node.Id) ? "Да" : "Нет")</td>
+                <td>Выход</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>
+
+@code {
+    private List<Node> ExitNodes = [];
+    private string Strategy = "roundRobin";
+
+    protected override async Task OnInitializedAsync()
+    {
+        ExitNodes = (await Nodes.List())
+            .Where(node => node.IsEnabled && node.Role.HasFlag(NodeRole.Exit))
+            .OrderBy(node => node.Name)
+            .ToList();
+        Strategy = await Settings.GetExitBalanceStrategy();
+    }
+
+    private async Task Save()
+    {
+        await Settings.SetExitBalanceStrategy(Strategy);
+        foreach (var node in await Nodes.List())
+        {
+            await Sync.SyncNode(node.Id);
+        }
+        Toast.Success("Настройки балансировщика применены");
+    }
+}

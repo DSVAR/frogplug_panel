@@ -9,7 +9,8 @@ public static class XrayConfigBuilder
         NodeSpec self,
         IReadOnlyList<NodeSpec> allNodes,
         IReadOnlyList<UserSpec> activeUsers,
-        IReadOnlyList<RuleSpec> rules)
+        IReadOnlyList<RuleSpec> rules,
+        string exitBalanceStrategy = "roundRobin")
     {
         var enabledNodes = allNodes.Where(node => node.IsEnabled).ToArray();
         var cascadeNodes = enabledNodes
@@ -132,7 +133,7 @@ public static class XrayConfigBuilder
                         {
                             address = node.Address,
                 port = NodePorts.Public,
-                            users = new[] { new { id = node.CascadeUuid, flow = "xtls-rprx-vision", encryption = "none" } }
+                            users = new[] { new { id = self.CascadeUuid, flow = "xtls-rprx-vision", encryption = "none" } }
                         }
                     }
                 },
@@ -158,7 +159,7 @@ public static class XrayConfigBuilder
                 tag = BalancerTag(pair.Key),
                 selector = pair.Value.Select(node => $"node-{node.Id}").ToArray(),
                 fallbackTag = "block",
-                strategy = new { type = "roundRobin" }
+                strategy = new { type = exitBalanceStrategy }
             })
             .ToArray();
 
@@ -324,6 +325,12 @@ public static class XrayConfigBuilder
         IReadOnlyList<RuleSpec> rules,
         IReadOnlyList<NodeSpec> nodes)
     {
+        // MAIN: не-RU трафик по умолчанию идёт в зарубежный Exit.
+        if (source.HasRole("Entry") && source.HasRole("RuExit") && destination.HasRole("Exit"))
+        {
+            return true;
+        }
+
         if (source.HasRole("WhitelistEntry") && source.WhitelistExitNodeId == destination.Id)
         {
             return true;
@@ -389,6 +396,9 @@ public static class XrayConfigBuilder
             case "port":
                 field.port = rule.Value;
                 break;
+            case "protocol":
+                field.protocol = new[] { rule.Value };
+                break;
         }
         return field;
     }
@@ -409,6 +419,8 @@ public static class XrayConfigBuilder
         public string? balancerTag { get; init; }
         public string[]? domain { get; set; }
         public string[]? ip { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[]? protocol { get; set; }
         public string? port { get; set; }
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string[]? inboundTag { get; init; }

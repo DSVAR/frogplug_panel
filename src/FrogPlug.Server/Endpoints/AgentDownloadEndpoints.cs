@@ -62,7 +62,11 @@ public static class AgentDownloadEndpoints
                 root = Path.Combine(environment.ContentRootPath, root);
             }
 
-            var path = Path.Combine(root, rid, "frogplug-agent");
+            var path = Path.Combine(root, rid, "FrogPlug.Agent");
+            if (!File.Exists(path))
+            {
+                path = Path.Combine(root, rid, "frogplug-agent");
+            }
             return File.Exists(path)
                 ? Results.File(path, "application/octet-stream", "frogplug-agent")
                 : Results.NotFound();

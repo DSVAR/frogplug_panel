@@ -2,7 +2,10 @@
 @inject ToastService Service
 @if (!string.IsNullOrWhiteSpace(Service.Message))
 {
-    <div class="toast @(Service.IsError ? "toast-error" : "toast-success")">@Service.Message</div>
+    <div class="toast @(Service.IsError ? "toast-error" : "toast-success")">
+        <Icon Name="@(Service.IsError ? "warning" : "check")" />
+        <span>@Service.Message</span>
+    </div>
 }
 @code {
     protected override void OnInitialized() => Service.Changed += Refresh;

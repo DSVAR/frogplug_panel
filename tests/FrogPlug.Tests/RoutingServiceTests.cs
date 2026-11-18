@@ -7,13 +7,13 @@ namespace FrogPlug.Tests;
 public sealed class RoutingServiceTests
 {
     [Fact]
-    public async Task Seed_creates_seven_rules_only_once()
+    public async Task Seed_creates_eight_rules_only_once()
     {
         await using var fixture = await ServiceFixture.CreateAsync();
         await fixture.Routing.SeedDefaultsAsync();
         await fixture.Routing.SeedDefaultsAsync();
         var rules = await fixture.Routing.List();
-        Assert.Equal(7, rules.Count);
+        Assert.Equal(8, rules.Count);
         Assert.Equal("block", rules[0].Target);
     }
 
@@ -26,7 +26,7 @@ public sealed class RoutingServiceTests
         await fixture.Routing.MoveDown(rules[0].Id);
         await fixture.Routing.MoveUp(rules[0].Id);
         var orders = (await fixture.Routing.List()).Select(rule => rule.Order).ToArray();
-        Assert.Equal(Enumerable.Range(1, 7), orders);
+        Assert.Equal(Enumerable.Range(1, 8), orders);
     }
 
     [Fact]

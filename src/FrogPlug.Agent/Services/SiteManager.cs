@@ -14,7 +14,9 @@ public sealed class SiteManager(IFileSystem files, IServiceController services, 
             : StubSiteTemplates.PersonalBlog;
         // Сайт «растёт» сам: новые записи появляются по текущей дате.
         var today = DateOnly.FromDateTime((clock ?? TimeProvider.System).GetUtcNow().UtcDateTime);
-        var siteFiles = StubSiteTemplates.BuildSite(template, request.Title ?? string.Empty, request.NodeId, today);
+        var siteFiles = StubSiteTemplates.BuildSite(template, request.Title ?? string.Empty, request.NodeId, today)
+            .ToDictionary(item => item.Key, item => item.Value);
+        siteFiles["install/index.html"] = InstallationDocs.Page;
         var changed = false;
         foreach (var file in siteFiles)
         {
@@ -45,4 +47,12 @@ public sealed class SiteManager(IFileSystem files, IServiceController services, 
         await files.WriteTextAsync(path, content, cancellationToken);
         return true;
     }
+}
+
+internal static class InstallationDocs
+{
+    public const string Page = """
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FrogPlug — установка</title><body><main><h1>FrogPlug</h1><p>Подключение сервера выполняется из панели.</p><ol><li>Откройте раздел «Ноды».</li><li>Добавьте сервер.</li><li>Скопируйте команду подключения и выполните её от root.</li></ol><p>После установки сервер появится в панели автоматически.</p></main></body></html>
+""";
 }

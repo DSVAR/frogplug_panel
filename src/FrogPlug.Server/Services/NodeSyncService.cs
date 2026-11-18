@@ -45,7 +45,11 @@ public sealed class NodeSyncService(
             await agent.ApplyHaproxy(node, new HaproxyApplyRequest(node.MtprotoEnabled, node.MtprotoRouteHost), cancellationToken);
             if (node.MaskMode == MaskMode.OwnDomain)
             {
-
+                var docsHost = settings is null ? null : await settings.GetDocsDomain();
+                var panelDomain = settings is null ? null : await settings.GetPanelDomain();
+                docsHost = string.Equals(node.Domain, panelDomain, StringComparison.OrdinalIgnoreCase)
+                    ? docsHost
+                    : null;
                 await agent.ApplyCaddy(
                     node,
                     new CaddyApplyRequest(
@@ -53,7 +57,8 @@ public sealed class NodeSyncService(
                         node.XhttpPath,
                         XhttpEnabled: node.XhttpEnabled,
                         MtprotoHost: node.MtprotoEnabled ? node.MtprotoRouteHost : null,
-                        TgWebEnabled: node.TgWebEnabled),
+                        TgWebEnabled: node.TgWebEnabled,
+                        DocsHost: docsHost),
                     cancellationToken);
                 await agent.ApplySite(node, new SiteApplyRequest(node.StubTemplate, node.StubTitle, node.CascadeUuid), cancellationToken);
             }
@@ -141,7 +146,10 @@ public sealed class NodeSyncService(
             Target = rule.Target,
             IsEnabled = rule.IsEnabled
         }).ToArray();
-        return XrayConfigBuilder.Build(self, allNodes, activeUsers, specs);
+        var exitBalanceStrategy = settings is null
+            ? "roundRobin"
+            : await settings.GetExitBalanceStrategy();
+        return XrayConfigBuilder.Build(self, allNodes, activeUsers, specs, exitBalanceStrategy);
     }
 
     private async Task ApplyHysteria(Node node, CancellationToken cancellationToken)

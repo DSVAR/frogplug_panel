@@ -45,6 +45,11 @@
                     <small>Используется для ссылок подписки.</small>
                 </div>
                 <div class="form-field">
+                    <label for="docs-domain">Домен установки</label>
+                    <InputText id="docs-domain" class="form-control" @bind-Value="Form.DocsDomain" />
+                    <small>Статическая документация и установка серверов.</small>
+                </div>
+                <div class="form-field">
                     <label for="profile-title">Заголовок профиля</label>
                     <InputText id="profile-title" class="form-control" @bind-Value="Form.ProfileTitle" />
                 </div>
@@ -180,6 +185,7 @@
     {
         Form.PublicBaseUrl = await Service.GetPublicBaseUrl();
         Form.PanelDomain = await Service.GetPanelDomain();
+        Form.DocsDomain = await Service.GetDocsDomain();
         Form.ProfileTitle = await Service.GetProfileTitle();
         Form.SupportUrl = await Service.GetSupportUrl();
         Form.SubscriptionUpdateHours = await Service.GetSubscriptionUpdateHours();
@@ -200,6 +206,7 @@
         {
             await Service.SetPublicBaseUrl(Form.PublicBaseUrl);
             await Service.SetPanelDomain(Form.PanelDomain);
+            await Service.SetDocsDomain(Form.DocsDomain);
             await Service.SetProfileTitle(Form.ProfileTitle);
             await Service.SetSupportUrl(Form.SupportUrl);
             await Service.SetSubscriptionUpdateHours(Form.SubscriptionUpdateHours);
@@ -252,6 +259,7 @@
     {
         public string? PanelDomain { get; set; }
         public string? PublicBaseUrl { get; set; }
+        public string? DocsDomain { get; set; }
         public string? ProfileTitle { get; set; }
         public string? SupportUrl { get; set; }
         public int SubscriptionUpdateHours { get; set; } = 12;

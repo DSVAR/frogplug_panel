@@ -39,7 +39,8 @@ public sealed class CaddyManager
             string.IsNullOrWhiteSpace(_options.PanelUpstream) ? null : _options.PanelUpstream,
             _options.PanelPath,
             _options.SubscriptionPath,
-            request.TgWebEnabled);
+            request.TgWebEnabled,
+            request.DocsHost);
         if (await FileContent.EqualsNormalizedAsync(_files, _options.CaddyfilePath, content, cancellationToken))
         {
             return (true, string.Empty);

@@ -17,7 +17,17 @@ function Get-XrayCore([string]$Rid, [string]$Asset)
     $url = "https://github.com/XTLS/Xray-core/releases/download/$Version/$Asset"
     $archive = Join-Path $directory $Asset
     $digest = "$archive.dgst"
+    $cachedDigest = "$archive.sha256"
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    if ((Test-Path -LiteralPath $archive) -and (Test-Path -LiteralPath $cachedDigest))
+    {
+        $expected = (Get-Content -Raw $cachedDigest).Trim().ToLowerInvariant()
+        $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($expected -eq $actual)
+        {
+            return
+        }
+    }
     Invoke-WebRequest -Uri $url -OutFile $archive
     Invoke-WebRequest -Uri "$url.dgst" -OutFile $digest
     $expected = ([regex]::Match((Get-Content -Raw $digest), 'SHA2-256=\s*([0-9a-fA-F]{64})')).Groups[1].Value.ToLowerInvariant()

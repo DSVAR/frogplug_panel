@@ -72,8 +72,9 @@ public sealed class NodeMonitor(
             db.NodeTrafficDaily.Add(daily);
         }
 
-        var hour = new DateTime(UtcNow.Year, UtcNow.Month, UtcNow.Day, UtcNow.Hour, 0, 0, DateTimeKind.Utc);
-        var hourly = await db.TrafficHourly.FirstOrDefaultAsync(item => item.Date == hour);
+        var hour = new DateTime(UtcNow.Year, UtcNow.Month, UtcNow.Day, UtcNow.Hour, 0, 0, DateTimeKind.Unspecified);
+        var nextHour = hour.AddHours(1);
+        var hourly = await db.TrafficHourly.FirstOrDefaultAsync(item => item.Date >= hour && item.Date < nextHour);
         if (hourly is null)
         {
             hourly = new TrafficHourly { Date = hour };

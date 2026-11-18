@@ -10,7 +10,7 @@
 <div>
 <h1>Маршрутизация</h1>
 <p class="muted">Правила проверяются сверху вниз: срабатывает первое совпадение.</p>
-<p class="muted">Остальное направляется напрямую.</p>
+<p class="muted">После правил не-RU трафик с MAIN идёт в зарубежные выходы.</p>
 </div>
 <button class="primary-button" @onclick="OpenCreate">Добавить правило</button>
 </div>
@@ -54,9 +54,17 @@
 </tbody>
 </table>
 </section>
+<section class="panel">
+<strong>Финальный маршрут MAIN</strong>
+<p class="muted">Все сайты, не совпавшие с правилами RU, направляются в: @ExitLabel</p>
+</section>
 <button class="secondary-button" @onclick="Seed">Восстановить правила по умолчанию</button>
 <Modal Title="@(EditingId is null ? "Новое правило" : "Изменить правило")" Visible="EditVisible" OnClose="CloseEdit">
 <Body>
+@if (!string.IsNullOrWhiteSpace(Error))
+{
+<p class="form-error">@Error</p>
+}
 <EditForm Model="Form" OnValidSubmit="Save">
 <div class="form-grid">
 <div class="form-field">
@@ -68,6 +76,7 @@
 <option value="Full">Точный домен</option>
 <option value="Ip">IP</option>
 <option value="Port">Порт</option>
+<option value="Protocol">Протокол</option>
 </select>
 </div>
 <div class="form-field">
@@ -105,23 +114,30 @@
     private bool EditVisible;
     private int? EditingId;
     private RuleForm Form = new();
+    private string? Error;
+    private string ExitLabel => string.Join(", ", NodeItems.Where(item => item.Role.HasFlag(NodeRole.Exit))
+        .Select(item => item.Name).DefaultIfEmpty("нет зарубежного выхода"));
     protected override async Task OnInitializedAsync() { await Load();
     NodeItems = await Nodes.List();
     }
     private async Task Load() => Rules = await Service.List();
     private void OpenCreate() { EditingId = null;
+    Error = null;
     Form = new();
     EditVisible = true;
     }
     private void OpenEdit(RoutingRule rule) { EditingId = rule.Id;
+    Error = null;
     Form = new() { Type = rule.MatchType.ToString(), Value = rule.Value, Target = rule.Target, Comment = rule.Comment };
     EditVisible = true;
     }
-    private async Task Save() { var input = new RoutingRuleInput(Enum.Parse<RoutingMatchType>(Form.Type), Form.Value, Form.Target, true, Form.Comment);
+    private async Task Save() { try { var input = new RoutingRuleInput(Enum.Parse<RoutingMatchType>(Form.Type), Form.Value, Form.Target, true, Form.Comment);
     if (EditingId is null) { await Service.Add(input);
     } else { await Service.Update(EditingId.Value, input);
     } EditVisible = false;
     await Load();
+    } catch (System.ComponentModel.DataAnnotations.ValidationException exception) { Error = exception.Message;
+    }
     }
     private async Task Toggle(RoutingRule rule, bool value) { await Service.SetEnabled(rule.Id, value);
     await Load();
@@ -148,6 +164,7 @@
         RoutingMatchType.Full => "Точный домен",
         RoutingMatchType.Ip => "IP",
         RoutingMatchType.Port => "Порт",
+        RoutingMatchType.Protocol => "Протокол",
         _ => type.ToString()
     };
     private string TargetLabel(string target) { if (target == "direct") return "Напрямую";

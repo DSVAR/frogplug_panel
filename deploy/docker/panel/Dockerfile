@@ -20,6 +20,8 @@ RUN apt-get update \
 
 COPY --from=build /out /opt/panel
 COPY artifacts/xray-core /opt/frogplug/xray-core
+COPY artifacts/agent /opt/panel/artifacts/agent
+COPY deploy/agent-install.sh /opt/panel/deploy/agent-install.sh
 
 # Внутри контейнера слушаем все интерфейсы; наружу порт публикуется только на 127.0.0.1 хоста.
 ENV ASPNETCORE_URLS=http://0.0.0.0:5280 \

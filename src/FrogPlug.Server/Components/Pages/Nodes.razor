@@ -82,6 +82,9 @@
                             <button class="small-button" type="button" @onclick="(() => OpenEdit(node))">
                                 Изменить
                             </button>
+                            <button class="small-button" type="button" @onclick="(() => OpenInstall(node))">
+                                Подключить
+                            </button>
                             <a class="small-button" href="nodes/@node.Id">Детали</a>
                             <button class="small-button" type="button" @onclick="(() => ApplyConfig(node))">
                                 Применить конфиг
@@ -670,6 +673,13 @@
         Toast.Error($"Не удалось применить конфигурацию: {updated.LastApplyError}");
     }
 
+    private async Task OpenInstall(Node node)
+    {
+        InstallNode = node;
+        PublicBaseUrl = await Settings.GetPublicBaseUrl();
+        InstallVisible = true;
+    }
+
     private async Task OpenXrayUpdate(Node node)
     {
         XrayNode = node;
@@ -854,7 +864,7 @@
 
     private string InstallCommand => string.IsNullOrWhiteSpace(PublicBaseUrl) || InstallNode is null
         ? string.Empty
-        : $"bash install.sh --images images-VERSION.tar --panel-url {PublicBaseUrl} --token {InstallNode.AgentToken}";
+        : $"curl -fsSL '{PublicBaseUrl.TrimEnd('/')}/agent/install.sh' | sudo bash -s -- --panel-url '{PublicBaseUrl}' --token '{InstallNode.AgentToken}'";
 
     private static string AgentMessage(Exception exception)
     {
